@@ -1,0 +1,9 @@
+{
+  "/onboarding/page": "app/onboarding/page.js",
+  "/discover/page": "app/discover/page.js",
+  "/api/recommendations/route": "app/api/recommendations/route.js",
+  "/page": "app/page.js",
+  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
+  "/signin/page": "app/signin/page.js",
+  "/matches/page": "app/matches/page.js"
+}
