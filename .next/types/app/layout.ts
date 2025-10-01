@@ -1,4 +1,4 @@
-// File: C:\Users\stars\Downloads\match-eats-web-starter\match-eats-web\app\layout.tsx
+// File: C:\Users\minse\matcheat\app\layout.tsx
 import * as entry from '../../../app/layout.js'
 import type { ResolvingMetadata, ResolvingViewport } from 'next/dist/lib/metadata/types/metadata-interface.js'
 

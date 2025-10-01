@@ -1,9 +1,6 @@
 {
-  "/onboarding/page": "app/onboarding/page.js",
-  "/discover/page": "app/discover/page.js",
-  "/api/recommendations/route": "app/api/recommendations/route.js",
+  "/_not-found/page": "app/_not-found/page.js",
   "/page": "app/page.js",
-  "/api/auth/[...nextauth]/route": "app/api/auth/[...nextauth]/route.js",
-  "/signin/page": "app/signin/page.js",
-  "/matches/page": "app/matches/page.js"
+  "/pages/chat/page": "app/pages/chat/page.js",
+  "/pages/matches/page": "app/pages/matches/page.js"
 }
