@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { auth } from "../../firebase"; 
+import { auth } from "../../../firebase"; 
 import { signInWithEmailAndPassword } from "firebase/auth";
 
 export default function SignInPage() {
@@ -43,7 +43,7 @@ export default function SignInPage() {
         alert("로그인 성공!");
 
         // ✅ 로그인 성공 후 afterlogin 페이지로 이동
-        router.push("/afterlogin");
+        router.push("/pages/matches");
       } catch (err: any) {
         console.error("로그인 실패:", err);
 

@@ -41,7 +41,7 @@ export default function LandingPage() {
       <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
         {/* 로그인 버튼 */}
         <button
-          onClick={() => router.push("/pages/matches")}                                    //로그인버튼 연결페이지 주소/sign/signin
+          onClick={() => router.push("/sign/signin")}                                    //로그인버튼 연결페이지 주소/sign/signin
           onMouseEnter={() => setHovered("login")}
           onMouseLeave={() => setHovered(null)}
           style={{

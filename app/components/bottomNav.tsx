@@ -58,11 +58,11 @@ export default function BottomNav() {
   const pathname = usePathname();
 
   const menus = [
-    { name: "지도", path: "/map", icon: <FaMapMarkedAlt /> },
-    { name: "요청란", path: "/requests", icon: <FaClipboardList /> },
+    { name: "지도", path: "/pages/map", icon: <FaMapMarkedAlt /> },
+    { name: "요청란", path: "/pages/requests", icon: <FaClipboardList /> },
     { name: "홈", path: "/pages/matches", icon: <FaHome /> },
     { name: "채팅", path: "/pages/chat", icon: <FaComments /> },
-    { name: "마이페이지", path: "/mypage", icon: <FaUser /> },
+    { name: "마이페이지", path: "/pages/mypage", icon: <FaUser /> },
   ];
 
   return (

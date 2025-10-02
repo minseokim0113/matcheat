@@ -3,7 +3,7 @@ import { useState, ChangeEvent, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 // ✅ Firebase 불러오기
-import { auth, db, storage } from "../../firebase"; 
+import { auth, db, storage } from "../../../firebase"; 
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; 

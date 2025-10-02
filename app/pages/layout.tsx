@@ -37,11 +37,9 @@ export default function AppLayout({ children }) {
       <main style={{ marginTop: "80px" }}>{children}</main> 
       {/* marginTop으로 고정 헤더 공간 확보 */}
 
-      {/*채팅*/}
-      <Link href="/chat">채팅</Link>
-
       {/* 하단 메뉴바 */}
       <BottomNav />
+      <Link href="/map">지도</Link>
     </div>
   );
 }

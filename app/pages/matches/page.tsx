@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
-import { db } from "../../firebase"; // 경로 확인
+import { db } from "../../../firebase"; // 경로 확인
 
 export default function MatchesPage() {
   const router = useRouter();
