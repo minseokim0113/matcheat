@@ -1,38 +1,22 @@
 'use client';
-import { useState, ChangeEvent, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 
 // ✅ Firebase 불러오기
-import { auth, db, storage } from "../../../firebase"; 
+import { auth, db } from "../../../firebase"; 
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage"; 
 
 export default function SignUpPage() {
   const router = useRouter();
   const [name, setName] = useState("");
   const [emailId, setEmailId] = useState("");
   const [emailDomain, setEmailDomain] = useState("");
+  const [customDomain, setCustomDomain] = useState(""); // ✅ 직접 입력용
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [gender, setGender] = useState<"남성" | "여성" | null>(null);
-
-  // ✅ 이미지 파일과 미리보기 상태
-  const [images, setImages] = useState<File[]>([]);
-  const [previewUrls, setPreviewUrls] = useState<(string | null)[]>([null, null, null, null]);
-
-  const handleFileChange = (e: ChangeEvent<HTMLInputElement>, index: number) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      const newFiles = [...images];
-      newFiles[index] = file;
-      setImages(newFiles);
-
-      const newPreviews = [...previewUrls];
-      newPreviews[index] = URL.createObjectURL(file);
-      setPreviewUrls(newPreviews);
-    }
-  };
+  const [bio, setBio] = useState("");
 
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [isFormValid, setIsFormValid] = useState(false);
@@ -45,23 +29,25 @@ export default function SignUpPage() {
 
   // ✅ 전체 유효성 검사
   useEffect(() => {
-    const fullEmail = `${emailId}@${emailDomain}`;
+    const domain = emailDomain === "직접 입력" ? customDomain : emailDomain;
+    const fullEmail = `${emailId}@${domain}`;
     const valid =
       name.trim() &&
       validateEmail(fullEmail) &&
       validatePassword(password) &&
       password === confirmPassword &&
-      images[0]; 
+      bio.trim();
     setIsFormValid(Boolean(valid));
-  }, [name, emailId, emailDomain, password, confirmPassword, images]);
+  }, [name, emailId, emailDomain, customDomain, password, confirmPassword, bio]);
 
   // ✅ 회원가입 처리
   const handleSubmit = async () => {
     const newErrors: { [key: string]: string } = {};
-    const fullEmail = `${emailId}@${emailDomain}`;
+    const domain = emailDomain === "직접 입력" ? customDomain : emailDomain;
+    const fullEmail = `${emailId}@${domain}`;
 
     if (!name.trim()) newErrors.name = "이름을 입력해주세요.";
-    if (!emailId || !emailDomain || !validateEmail(fullEmail)) {
+    if (!emailId || !domain || !validateEmail(fullEmail)) {
       newErrors.email = "올바른 이메일을 입력해주세요.";
     }
     if (!validatePassword(password)) {
@@ -70,33 +56,24 @@ export default function SignUpPage() {
     if (password !== confirmPassword) {
       newErrors.confirmPassword = "비밀번호가 일치하지 않습니다.";
     }
-    if (!images[0]) {
-      newErrors.image = "프로필 이미지는 최소 1장은 필요합니다.";
+    if (!bio.trim()) {
+      newErrors.bio = "자기소개를 입력해주세요.";
     }
 
     setErrors(newErrors);
 
     if (Object.keys(newErrors).length === 0) {
       try {
-        const userCredential = await createUserWithEmailAndPassword(
-          auth,
-          fullEmail,
-          password
-        );
+        const userCredential = await createUserWithEmailAndPassword(auth, fullEmail, password);
         const user = userCredential.user;
 
-        let profileImageUrl = "";
-        if (images[0]) {
-          const imageRef = ref(storage, `profileImages/${user.uid}`);
-          await uploadBytes(imageRef, images[0]);
-          profileImageUrl = await getDownloadURL(imageRef);
-        }
-
+        // Firestore에 사용자 정보 저장
         await setDoc(doc(db, "users", user.uid), {
           name,
           email: fullEmail,
           gender,
-          profileImage: profileImageUrl,
+          bio,
+          profileImage: "",
           createdAt: new Date(),
         });
 
@@ -111,33 +88,6 @@ export default function SignUpPage() {
   return (
     <div style={{ minHeight: "100vh", backgroundColor: "#fff", fontFamily: "sans-serif", padding: "24px" }}>
       <h1 style={{ fontSize: "24px", fontWeight: "bold", marginBottom: "24px" }}>회원가입</h1>
-
-      {/* ✅ 프로필 이미지 업로드 (맨 위로 이동) */}
-      <div style={{ marginBottom: "24px" }}>
-        <h3 style={{ fontWeight: "bold", marginBottom: "8px" }}>프로필 이미지</h3>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px" }}>
-          {previewUrls.map((img, idx) => (
-            <label key={idx} style={{
-              border: "2px solid #ccc",
-              borderRadius: "8px",
-              height: "100px",
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              cursor: "pointer",
-              overflow: "hidden",
-            }}>
-              {img ? (
-                <img src={img} alt="preview" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-              ) : (
-                <span style={{ fontSize: "24px", color: "#999" }}>+</span>
-              )}
-              <input type="file" accept="image/*" style={{ display: "none" }} onChange={(e) => handleFileChange(e, idx)} />
-            </label>
-          ))}
-        </div>
-        {errors.image && <p style={{ color: "red", fontSize: "12px" }}>{errors.image}</p>}
-      </div>
 
       {/* 이름 */}
       <div style={{ marginBottom: "16px" }}>
@@ -157,7 +107,7 @@ export default function SignUpPage() {
       </div>
 
       {/* 이메일 */}
-      <div style={{ marginBottom: "16px", display: "flex", gap: "8px" }}>
+      <div style={{ marginBottom: "16px", display: "flex", gap: "8px", alignItems: "center" }}>
         <input
           type="text"
           placeholder="이메일 아이디"
@@ -183,12 +133,30 @@ export default function SignUpPage() {
         >
           <option value="">도메인 선택</option>
           {emailDomains.map((domain) => (
-            <option key={domain} value={domain === "직접 입력" ? "" : domain}>
+            <option key={domain} value={domain}>
               {domain}
             </option>
           ))}
         </select>
       </div>
+
+      {/* 직접 입력 input (선택한 경우만 표시) */}
+      {emailDomain === "직접 입력" && (
+        <div style={{ marginBottom: "16px" }}>
+          <input
+            type="text"
+            placeholder="도메인 직접 입력"
+            value={customDomain}
+            onChange={(e) => setCustomDomain(e.target.value)}
+            style={{
+              width: "100%",
+              border: errors.email ? "2px solid red" : "1px solid #ccc",
+              padding: "8px",
+              borderRadius: "8px",
+            }}
+          />
+        </div>
+      )}
       {errors.email && <p style={{ color: "red", fontSize: "12px" }}>{errors.email}</p>}
 
       {/* 비밀번호 */}
@@ -225,7 +193,7 @@ export default function SignUpPage() {
         {errors.confirmPassword && <p style={{ color: "red", fontSize: "12px" }}>{errors.confirmPassword}</p>}
       </div>
 
-      {/* 성별 선택 */}
+      {/* 성별 */}
       <div style={{ marginBottom: "16px" }}>
         <select
           value={gender || ""}
@@ -241,6 +209,23 @@ export default function SignUpPage() {
           <option value="남성">남성</option>
           <option value="여성">여성</option>
         </select>
+      </div>
+
+      {/* 자기소개 */}
+      <div style={{ marginBottom: "16px" }}>
+        <textarea
+          placeholder="자기소개를 입력하세요"
+          value={bio}
+          onChange={(e) => setBio(e.target.value)}
+          style={{
+            width: "100%",
+            height: "80px",
+            border: errors.bio ? "2px solid red" : "1px solid #ccc",
+            padding: "8px",
+            borderRadius: "8px",
+          }}
+        />
+        {errors.bio && <p style={{ color: "red", fontSize: "12px" }}>{errors.bio}</p>}
       </div>
 
       {/* 회원가입 버튼 */}
@@ -273,4 +258,3 @@ export default function SignUpPage() {
     </div>
   );
 }
-
