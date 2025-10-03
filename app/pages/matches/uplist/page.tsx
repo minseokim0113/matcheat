@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { collection, addDoc } from "firebase/firestore";
-import { db } from "../../../firebase";
+import { db } from "../../../../firebase";
 
 export default function UplistPage() {
   const router = useRouter();
@@ -16,7 +16,7 @@ export default function UplistPage() {
     if (!title || !category || !content) return;
 
     await addDoc(collection(db, "posts"), { title, category, content });
-    router.push("/matches");
+    router.push("/pages/matches");
   };
 
   return (
