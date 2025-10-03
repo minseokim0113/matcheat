@@ -5,8 +5,15 @@ import { collection, getDocs, deleteDoc, doc } from "firebase/firestore";
 import { db } from "../../../firebase"; // 경로 확인
 
 export default function MatchesPage() {
+  type Post = {
+    id: string;
+    category: string;
+    title: string;
+    content: string;
+  };
+
   const router = useRouter();
-  const [posts, setPosts] = useState([]);
+  const [posts, setPosts] = useState<Post[]>([]);
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("전체");
 
@@ -15,7 +22,10 @@ export default function MatchesPage() {
   // Firestore에서 게시글 불러오기
   const fetchPosts = async () => {
     const querySnapshot = await getDocs(collection(db, "posts"));
-    const postsArray = querySnapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+    const postsArray = querySnapshot.docs.map((doc) => {
+       const data = doc.data() as Omit<Post, "id">; // id 제외 Post 타입
+       return { id: doc.id, ...data };
+    });
     setPosts(postsArray);
   };
 
@@ -24,7 +34,7 @@ export default function MatchesPage() {
   }, []);
 
   // 삭제 기능
-  const handleDelete = async (id) => {
+  const handleDelete = async (id: string) => {
     await deleteDoc(doc(db, "posts", id));
     fetchPosts(); // 삭제 후 갱신
   };
@@ -73,7 +83,7 @@ export default function MatchesPage() {
 
       {/* 글 등록 버튼 */}
       <button
-        onClick={() => router.push("/matches/uplist")}
+        onClick={() => router.push("/pages/matches/uplist")}
         style={{ padding: "0.5rem 1.5rem", backgroundColor: "#003366", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", marginBottom: "1rem" }}
       >
         글 등록
