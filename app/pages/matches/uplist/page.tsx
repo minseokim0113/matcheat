@@ -1,22 +1,38 @@
 "use client";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { collection, addDoc } from "firebase/firestore";
-import { db } from "../../../../firebase";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { db, auth } from "../../../../firebase";
 
 export default function UplistPage() {
   const router = useRouter();
   const [title, setTitle] = useState("");
   const [category, setCategory] = useState("");
   const [content, setContent] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const categories = ["한식", "중식", "일식", "양식"];
 
   const handleRegister = async () => {
-    if (!title || !category || !content) return;
+    if (!title.trim() || !category || !content.trim()) {
+      alert("제목/카테고리/내용을 모두 입력하세요."); return;
+    }
+    const uid = auth.currentUser?.uid;
+    if (!uid) return alert("로그인이 필요합니다.");
 
-    await addDoc(collection(db, "posts"), { title, category, content });
-    router.push("/pages/matches");
+    try {
+      setSubmitting(true);
+      await addDoc(collection(db, "posts"), {
+        title: title.trim(),
+        category,
+        content: content.trim(),
+        authorId: uid,                // 👈 요청 toUserId로 사용됨
+        createdAt: serverTimestamp(),
+      });
+      router.push("/pages/matches");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -59,9 +75,10 @@ export default function UplistPage() {
 
       <button
         onClick={handleRegister}
-        style={{ padding: "0.5rem 1.5rem", backgroundColor: "#003366", color: "white", border: "none", borderRadius: "5px", cursor: "pointer" }}
+        disabled={submitting}
+        style={{ padding: "0.5rem 1.5rem", backgroundColor: submitting ? "#7f8c8d" : "#003366", color: "white", border: "none", borderRadius: "5px", cursor: submitting ? "not-allowed" : "pointer" }}
       >
-        등록
+        {submitting ? "등록 중..." : "등록"}
       </button>
     </div>
   );

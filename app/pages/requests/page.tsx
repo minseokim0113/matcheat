@@ -1,157 +1,129 @@
 "use client";
-import { useState, useEffect } from "react";
-import { collection, query, where, getDocs, updateDoc, doc, getDoc } from "firebase/firestore";
-import { db } from "../../../firebase";
+import { useEffect, useState } from "react";
+import {
+  collection, query, where, getDocs, updateDoc, doc, getDoc,
+} from "firebase/firestore";
+import { onAuthStateChanged } from "firebase/auth";
+import { db, auth } from "../../../firebase";
 
-type Request = {
+type RequestDoc = {
   id: string;
   postId: string;
   fromUserId: string;
   toUserId: string;
   status: "pending" | "rejected" | "matched";
+  expectedCost?: string | null;
+  district?: string | null;
 };
 
-type Post = {
-  title: string;
-  authorId: string;
-};
+type Post = { title: string; authorId?: string };
+type User = { name?: string };
 
-type User = {
-  name: string;
-};
-
-export default function RequestsPage({ currentUserId }: { currentUserId: string }) {
-  const [receivedRequests, setReceivedRequests] = useState<Request[]>([]);
-  const [sentRequests, setSentRequests] = useState<Request[]>([]);
+export default function RequestsPage() {
+  const [uid, setUid] = useState<string | null>(null);
+  const [received, setReceived] = useState<RequestDoc[]>([]);
+  const [sent, setSent] = useState<RequestDoc[]>([]);
   const [activeTab, setActiveTab] = useState<"received" | "sent">("received");
   const [postsMap, setPostsMap] = useState<Record<string, Post>>({});
   const [usersMap, setUsersMap] = useState<Record<string, User>>({});
 
-  const fetchRequests = async () => {
-    // 받은 요청
-    const receivedQuery = query(collection(db, "requests"), where("toUserId", "==", currentUserId));
-    const receivedSnap = await getDocs(receivedQuery);
-    const receivedData = receivedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Request));
-    setReceivedRequests(receivedData);
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null));
+    return () => unsub();
+  }, []);
 
-    // 보낸 요청
-    const sentQuery = query(collection(db, "requests"), where("fromUserId", "==", currentUserId));
-    const sentSnap = await getDocs(sentQuery);
-    const sentData = sentSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Request));
-    setSentRequests(sentData);
+  const fetchRequests = async (me: string) => {
+    const qRecv = query(collection(db, "requests"), where("toUserId", "==", me));
+    const recvSnap = await getDocs(qRecv);
+    const recv = recvSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as RequestDoc[];
+    setReceived(recv);
 
-    // 글 정보 가져오기
-    const allPostIds = Array.from(new Set([...receivedData, ...sentData].map(r => r.postId)));
+    const qSent = query(collection(db, "requests"), where("fromUserId", "==", me));
+    const sentSnap = await getDocs(qSent);
+    const snt = sentSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as RequestDoc[];
+    setSent(snt);
+
+    const postIds = Array.from(new Set([...recv, ...snt].map((r) => r.postId)));
+    const userIds = Array.from(new Set([...recv, ...snt].flatMap((r) => [r.fromUserId, r.toUserId])));
+
     const posts: Record<string, Post> = {};
-    for (const postId of allPostIds) {
-      const postDoc = await getDoc(doc(db, "posts", postId));
-      if (postDoc.exists()) posts[postId] = postDoc.data() as Post;
+    for (const pid of postIds) {
+      const pd = await getDoc(doc(db, "posts", pid));
+      if (pd.exists()) posts[pid] = pd.data() as Post;
     }
     setPostsMap(posts);
 
-    // 사용자 정보 가져오기
-    const userIds = Array.from(new Set([...receivedData, ...sentData].flatMap(r => [r.fromUserId, r.toUserId])));
     const users: Record<string, User> = {};
-    for (const userId of userIds) {
-      const userDoc = await getDoc(doc(db, "users", userId));
-      if (userDoc.exists()) users[userId] = userDoc.data() as User;
+    for (const id of userIds) {
+      const ud = await getDoc(doc(db, "users", id));
+      if (ud.exists()) users[id] = ud.data() as User;
     }
     setUsersMap(users);
   };
 
-  useEffect(() => {
-    fetchRequests();
-  }, []);
+  useEffect(() => { if (uid) fetchRequests(uid); }, [uid]);
 
-  const handleReceivedAction = async (reqId: string, action: "rejected" | "matched") => {
+  const act = async (reqId: string, action: "rejected" | "matched") => {
     await updateDoc(doc(db, "requests", reqId), { status: action });
-    fetchRequests();
+    if (uid) fetchRequests(uid);
   };
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "pending": return "#f0ad4e"; // 대기중
-      case "rejected": return "#d9534f"; // 거절됨
-      case "matched": return "#0275d8"; // 매칭완료
-      default: return "#ccc";
-    }
-  };
+  const statusColor = (s: RequestDoc["status"]) =>
+    s === "pending" ? "#f0ad4e" : s === "rejected" ? "#d9534f" : "#0275d8";
 
   return (
     <div style={{ padding: "1rem" }}>
       {/* 탭 */}
       <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
         <button
-          style={{
-            padding: "0.5rem 1rem",
-            borderBottom: activeTab === "received" ? "2px solid #003366" : "2px solid transparent",
-            fontWeight: activeTab === "received" ? "bold" : "normal",
-            cursor: "pointer",
-            background: "none",
-            border: "none",
-          }}
           onClick={() => setActiveTab("received")}
+          style={{ padding: "0.5rem 1rem", borderBottom: activeTab === "received" ? "2px solid #003366" : "2px solid transparent", background: "none", border: "none", cursor: "pointer", fontWeight: activeTab === "received" ? "bold" : "normal" }}
         >
           받은 요청
         </button>
         <button
-          style={{
-            padding: "0.5rem 1rem",
-            borderBottom: activeTab === "sent" ? "2px solid #003366" : "2px solid transparent",
-            fontWeight: activeTab === "sent" ? "bold" : "normal",
-            cursor: "pointer",
-            background: "none",
-            border: "none",
-          }}
           onClick={() => setActiveTab("sent")}
+          style={{ padding: "0.5rem 1rem", borderBottom: activeTab === "sent" ? "2px solid #003366" : "2px solid transparent", background: "none", border: "none", cursor: "pointer", fontWeight: activeTab === "sent" ? "bold" : "normal" }}
         >
           보낸 요청
         </button>
       </div>
 
       {/* 받은 요청 */}
-      {activeTab === "received" &&
-        (receivedRequests.length ? (
-          receivedRequests.map(req => (
-            <div key={req.id} style={{ border: "1px solid #ccc", borderRadius: "8px", padding: "0.5rem", marginBottom: "0.5rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <p style={{ margin: 0 }}>글 제목: {postsMap[req.postId]?.title || req.postId}</p>
-                <p style={{ margin: 0 }}>보낸 사람: {usersMap[req.fromUserId]?.name || req.fromUserId}</p>
-              </div>
-              <div style={{ display: "flex", gap: "0.5rem" }}>
-                <button
-                  style={{ backgroundColor: "#0275d8", color: "white", border: "none", borderRadius: "5px", padding: "0.25rem 0.5rem", cursor: "pointer" }}
-                  onClick={() => handleReceivedAction(req.id, "matched")}
-                >
-                  수락
-                </button>
-                <button
-                  style={{ backgroundColor: "#d9534f", color: "white", border: "none", borderRadius: "5px", padding: "0.25rem 0.5rem", cursor: "pointer" }}
-                  onClick={() => handleReceivedAction(req.id, "rejected")}
-                >
-                  거절
-                </button>
-              </div>
+      {activeTab === "received" && (
+        received.length ? received.map((r) => (
+          <div key={r.id} style={{ border: "1px solid #ccc", borderRadius: 8, padding: 8, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ margin: 0 }}>글 제목: {postsMap[r.postId]?.title || r.postId}</p>
+              <p style={{ margin: 0 }}>보낸 사람: {usersMap[r.fromUserId]?.name || r.fromUserId}</p>
+              <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                {r.district ? `지역: ${r.district} ` : ""}
+                {r.expectedCost ? `· 예상비용: ${r.expectedCost}` : ""}
+              </p>
             </div>
-          ))
-        ) : (
-          <p>받은 요청이 없습니다.</p>
-        ))}
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={() => act(r.id, "matched")} style={{ background: "#0275d8", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>수락</button>
+              <button onClick={() => act(r.id, "rejected")} style={{ background: "#d9534f", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>거절</button>
+            </div>
+          </div>
+        )) : <p>받은 요청이 없습니다.</p>
+      )}
 
       {/* 보낸 요청 */}
-      {activeTab === "sent" &&
-        (sentRequests.length ? (
-          sentRequests.map(req => (
-            <div key={req.id} style={{ border: "1px solid #ccc", borderRadius: "8px", padding: "0.5rem", marginBottom: "0.5rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div>
-                <p style={{ margin: 0 }}>글 제목: {postsMap[req.postId]?.title || req.postId}</p>
-                <p style={{ margin: 0 }}>상태: <span style={{ color: getStatusColor(req.status) }}>{req.status}</span></p>
-              </div>
+      {activeTab === "sent" && (
+        sent.length ? sent.map((r) => (
+          <div key={r.id} style={{ border: "1px solid #ccc", borderRadius: 8, padding: 8, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div>
+              <p style={{ margin: 0 }}>글 제목: {postsMap[r.postId]?.title || r.postId}</p>
+              <p style={{ margin: 0 }}>상태: <span style={{ color: statusColor(r.status) }}>{r.status}</span></p>
+              <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
+                {r.district ? `지역: ${r.district} ` : ""}
+                {r.expectedCost ? `· 예상비용: ${r.expectedCost}` : ""}
+              </p>
             </div>
-          ))
-        ) : (
-          <p>보낸 요청이 없습니다.</p>
-        ))}
+          </div>
+        )) : <p>보낸 요청이 없습니다.</p>
+      )}
     </div>
   );
 }
