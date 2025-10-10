@@ -1,10 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
-import {
-  collection, query, where, getDocs, updateDoc, doc, getDoc,
-} from "firebase/firestore";
-import { onAuthStateChanged } from "firebase/auth";
-import { db, auth } from "../../../firebase";
+import { useState, useEffect } from "react";
+import { collection, query, where, getDocs, updateDoc, deleteDoc, doc, getDoc } from "firebase/firestore"; // ✅ deleteDoc 추가
+import { db } from "../../../firebase";
 
 type RequestDoc = {
   id: string;
@@ -16,8 +13,16 @@ type RequestDoc = {
   district?: string | null;
 };
 
-type Post = { title: string; authorId?: string };
-type User = { name?: string };
+type Post = {
+  title: string;
+  authorId: string;
+};
+
+type User = {
+  name: string;
+  location?: string;  // ✅ 위치 정보 추가
+  mbti?: string;      // ✅ MBTI 정보 추가
+};
 
 export default function RequestsPage() {
   const [uid, setUid] = useState<string | null>(null);
@@ -27,16 +32,13 @@ export default function RequestsPage() {
   const [postsMap, setPostsMap] = useState<Record<string, Post>>({});
   const [usersMap, setUsersMap] = useState<Record<string, User>>({});
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, (u) => setUid(u?.uid ?? null));
-    return () => unsub();
-  }, []);
-
-  const fetchRequests = async (me: string) => {
-    const qRecv = query(collection(db, "requests"), where("toUserId", "==", me));
-    const recvSnap = await getDocs(qRecv);
-    const recv = recvSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as RequestDoc[];
-    setReceived(recv);
+  const fetchRequests = async () => {
+    //if (!currentUserId) return; // ✅ fetchRequests() 안 확정x
+    // 받은 요청
+    const receivedQuery = query(collection(db, "requests"), where("toUserId", "==", currentUserId));
+    const receivedSnap = await getDocs(receivedQuery);
+    const receivedData = receivedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Request));
+    setReceivedRequests(receivedData);
 
     const qSent = query(collection(db, "requests"), where("fromUserId", "==", me));
     const sentSnap = await getDocs(qSent);
@@ -61,15 +63,33 @@ export default function RequestsPage() {
     setUsersMap(users);
   };
 
-  useEffect(() => { if (uid) fetchRequests(uid); }, [uid]);
+  useEffect(() => {
+    //if (!currentUserId) return; // ✅ 확정x
+    fetchRequests();
+  }, [currentUserId]);
 
-  const act = async (reqId: string, action: "rejected" | "matched") => {
+  // 받은 요청 → 수락 / 거절
+  const handleReceivedAction = async (reqId: string, action: "rejected" | "matched") => {
     await updateDoc(doc(db, "requests", reqId), { status: action });
     if (uid) fetchRequests(uid);
   };
 
-  const statusColor = (s: RequestDoc["status"]) =>
-    s === "pending" ? "#f0ad4e" : s === "rejected" ? "#d9534f" : "#0275d8";
+  // ✅ 보낸 요청 → 요청 취소
+  const handleCancelRequest = async (reqId: string) => {
+    if (confirm("요청을 취소하시겠습니까?")) {
+      await deleteDoc(doc(db, "requests", reqId));
+      fetchRequests();
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case "pending": return "#f0ad4e"; // 대기중
+      case "rejected": return "#d9534f"; // 거절됨
+      case "matched": return "#0275d8"; // 매칭완료
+      default: return "#ccc";
+    }
+  };
 
   return (
     <div style={{ padding: "1rem" }}>
@@ -90,36 +110,119 @@ export default function RequestsPage() {
       </div>
 
       {/* 받은 요청 */}
-      {activeTab === "received" && (
-        received.length ? received.map((r) => (
-          <div key={r.id} style={{ border: "1px solid #ccc", borderRadius: 8, padding: 8, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <p style={{ margin: 0 }}>글 제목: {postsMap[r.postId]?.title || r.postId}</p>
-              <p style={{ margin: 0 }}>보낸 사람: {usersMap[r.fromUserId]?.name || r.fromUserId}</p>
-              <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
-                {r.district ? `지역: ${r.district} ` : ""}
-                {r.expectedCost ? `· 예상비용: ${r.expectedCost}` : ""}
-              </p>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button onClick={() => act(r.id, "matched")} style={{ background: "#0275d8", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>수락</button>
-              <button onClick={() => act(r.id, "rejected")} style={{ background: "#d9534f", color: "#fff", border: "none", borderRadius: 6, padding: "4px 8px", cursor: "pointer" }}>거절</button>
-            </div>
-          </div>
-        )) : <p>받은 요청이 없습니다.</p>
-      )}
+      {activeTab === "received" &&
+        (receivedRequests.length ? (
+          receivedRequests.map(req => {
+            const sender = usersMap[req.fromUserId];
+            return (
+              <div
+                key={req.id}
+                style={{
+                  border: "1px solid #ccc",
+                  borderRadius: "8px",
+                  padding: "0.75rem",
+                  marginBottom: "0.75rem",
+                }}
+              >
+                <p style={{ margin: "0.25rem 0" }}>
+                  <strong>글 제목:</strong> {postsMap[req.postId]?.title || req.postId}
+                </p>
+                <p style={{ margin: "0.25rem 0" }}>
+                  <strong>보낸 사람:</strong> {sender?.name || req.fromUserId}
+                </p>
+
+                {/* ✅ 요청자 상세 정보 표시 */}
+                {sender && (
+                  <>
+                    <p style={{ margin: "0.25rem 0" }}>
+                      <strong>위치:</strong> {sender.location || "비공개"}
+                    </p>
+                    <p style={{ margin: "0.25rem 0" }}>
+                      <strong>MBTI:</strong> {sender.mbti || "비공개"}
+                    </p>
+                  </>
+                )}
+
+                {/* 수락/거절 버튼 */}
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                  <button
+                    style={{
+                      backgroundColor: "#0275d8",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "5px",
+                      padding: "0.25rem 0.5rem",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => handleReceivedAction(req.id, "matched")}
+                  >
+                    수락
+                  </button>
+                  <button
+                    style={{
+                      backgroundColor: "#d9534f",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "5px",
+                      padding: "0.25rem 0.5rem",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => handleReceivedAction(req.id, "rejected")}
+                  >
+                    거절
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <p>받은 요청이 없습니다.</p>
+        ))}
 
       {/* 보낸 요청 */}
-      {activeTab === "sent" && (
-        sent.length ? sent.map((r) => (
-          <div key={r.id} style={{ border: "1px solid #ccc", borderRadius: 8, padding: 8, marginBottom: 8, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div>
-              <p style={{ margin: 0 }}>글 제목: {postsMap[r.postId]?.title || r.postId}</p>
-              <p style={{ margin: 0 }}>상태: <span style={{ color: statusColor(r.status) }}>{r.status}</span></p>
-              <p style={{ margin: 0, fontSize: 13, color: "#555" }}>
-                {r.district ? `지역: ${r.district} ` : ""}
-                {r.expectedCost ? `· 예상비용: ${r.expectedCost}` : ""}
+      {activeTab === "sent" &&
+        (sentRequests.length ? (
+          sentRequests.map(req => (
+            <div
+              key={req.id}
+              style={{
+                border: "1px solid #ccc",
+                borderRadius: "8px",
+                padding: "0.75rem",
+                marginBottom: "0.75rem",
+              }}
+            >
+              <p style={{ margin: "0.25rem 0" }}>
+                <strong>글 제목:</strong> {postsMap[req.postId]?.title || req.postId}
               </p>
+              <p style={{ margin: "0.25rem 0" }}>
+                <strong>상태:</strong>{" "}
+                <span style={{ color: getStatusColor(req.status) }}>
+                  {req.status === "pending"
+                    ? "대기중"
+                    : req.status === "matched"
+                    ? "매칭완료"
+                    : "거절됨"}
+                </span>
+              </p>
+
+              {/* ✅ 요청 취소 버튼 */}
+              {req.status === "pending" && (
+                <button
+                  style={{
+                    backgroundColor: "#6c757d",
+                    color: "white",
+                    border: "none",
+                    borderRadius: "5px",
+                    padding: "0.25rem 0.5rem",
+                    cursor: "pointer",
+                    marginTop: "0.5rem",
+                  }}
+                  onClick={() => handleCancelRequest(req.id)}
+                >
+                  요청 취소
+                </button>
+              )}
             </div>
           </div>
         )) : <p>보낸 요청이 없습니다.</p>
