@@ -3,12 +3,14 @@ import { useState, useEffect } from "react";
 import { collection, query, where, getDocs, updateDoc, deleteDoc, doc, getDoc } from "firebase/firestore"; // ✅ deleteDoc 추가
 import { db } from "../../../firebase";
 
-type Request = {
+type RequestDoc = {
   id: string;
   postId: string;
   fromUserId: string;
   toUserId: string;
   status: "pending" | "rejected" | "matched";
+  expectedCost?: string | null;
+  district?: string | null;
 };
 
 type Post = {
@@ -22,9 +24,10 @@ type User = {
   mbti?: string;      // ✅ MBTI 정보 추가
 };
 
-export default function RequestsPage({ currentUserId }: { currentUserId: string }) {
-  const [receivedRequests, setReceivedRequests] = useState<Request[]>([]);
-  const [sentRequests, setSentRequests] = useState<Request[]>([]);
+export default function RequestsPage() {
+  const [uid, setUid] = useState<string | null>(null);
+  const [received, setReceived] = useState<RequestDoc[]>([]);
+  const [sent, setSent] = useState<RequestDoc[]>([]);
   const [activeTab, setActiveTab] = useState<"received" | "sent">("received");
   const [postsMap, setPostsMap] = useState<Record<string, Post>>({});
   const [usersMap, setUsersMap] = useState<Record<string, User>>({});
@@ -37,27 +40,25 @@ export default function RequestsPage({ currentUserId }: { currentUserId: string 
     const receivedData = receivedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Request));
     setReceivedRequests(receivedData);
 
-    // 보낸 요청
-    const sentQuery = query(collection(db, "requests"), where("fromUserId", "==", currentUserId));
-    const sentSnap = await getDocs(sentQuery);
-    const sentData = sentSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Request));
-    setSentRequests(sentData);
+    const qSent = query(collection(db, "requests"), where("fromUserId", "==", me));
+    const sentSnap = await getDocs(qSent);
+    const snt = sentSnap.docs.map((d) => ({ id: d.id, ...(d.data() as any) })) as RequestDoc[];
+    setSent(snt);
 
-    // 글 정보 가져오기
-    const allPostIds = Array.from(new Set([...receivedData, ...sentData].map(r => r.postId)));
+    const postIds = Array.from(new Set([...recv, ...snt].map((r) => r.postId)));
+    const userIds = Array.from(new Set([...recv, ...snt].flatMap((r) => [r.fromUserId, r.toUserId])));
+
     const posts: Record<string, Post> = {};
-    for (const postId of allPostIds) {
-      const postDoc = await getDoc(doc(db, "posts", postId));
-      if (postDoc.exists()) posts[postId] = postDoc.data() as Post;
+    for (const pid of postIds) {
+      const pd = await getDoc(doc(db, "posts", pid));
+      if (pd.exists()) posts[pid] = pd.data() as Post;
     }
     setPostsMap(posts);
 
-    // 사용자 정보 가져오기
-    const userIds = Array.from(new Set([...receivedData, ...sentData].flatMap(r => [r.fromUserId, r.toUserId])));
     const users: Record<string, User> = {};
-    for (const userId of userIds) {
-      const userDoc = await getDoc(doc(db, "users", userId));
-      if (userDoc.exists()) users[userId] = userDoc.data() as User;
+    for (const id of userIds) {
+      const ud = await getDoc(doc(db, "users", id));
+      if (ud.exists()) users[id] = ud.data() as User;
     }
     setUsersMap(users);
   };
@@ -70,7 +71,7 @@ export default function RequestsPage({ currentUserId }: { currentUserId: string 
   // 받은 요청 → 수락 / 거절
   const handleReceivedAction = async (reqId: string, action: "rejected" | "matched") => {
     await updateDoc(doc(db, "requests", reqId), { status: action });
-    fetchRequests();
+    if (uid) fetchRequests(uid);
   };
 
   // ✅ 보낸 요청 → 요청 취소
@@ -95,28 +96,14 @@ export default function RequestsPage({ currentUserId }: { currentUserId: string 
       {/* 탭 */}
       <div style={{ display: "flex", gap: "1rem", marginBottom: "1rem" }}>
         <button
-          style={{
-            padding: "0.5rem 1rem",
-            borderBottom: activeTab === "received" ? "2px solid #003366" : "2px solid transparent",
-            fontWeight: activeTab === "received" ? "bold" : "normal",
-            cursor: "pointer",
-            background: "none",
-            border: "none",
-          }}
           onClick={() => setActiveTab("received")}
+          style={{ padding: "0.5rem 1rem", borderBottom: activeTab === "received" ? "2px solid #003366" : "2px solid transparent", background: "none", border: "none", cursor: "pointer", fontWeight: activeTab === "received" ? "bold" : "normal" }}
         >
           받은 요청
         </button>
         <button
-          style={{
-            padding: "0.5rem 1rem",
-            borderBottom: activeTab === "sent" ? "2px solid #003366" : "2px solid transparent",
-            fontWeight: activeTab === "sent" ? "bold" : "normal",
-            cursor: "pointer",
-            background: "none",
-            border: "none",
-          }}
           onClick={() => setActiveTab("sent")}
+          style={{ padding: "0.5rem 1rem", borderBottom: activeTab === "sent" ? "2px solid #003366" : "2px solid transparent", background: "none", border: "none", cursor: "pointer", fontWeight: activeTab === "sent" ? "bold" : "normal" }}
         >
           보낸 요청
         </button>
@@ -237,10 +224,9 @@ export default function RequestsPage({ currentUserId }: { currentUserId: string 
                 </button>
               )}
             </div>
-          ))
-        ) : (
-          <p>보낸 요청이 없습니다.</p>
-        ))}
+          </div>
+        )) : <p>보낸 요청이 없습니다.</p>
+      )}
     </div>
   );
 }

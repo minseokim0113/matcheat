@@ -210,7 +210,7 @@ export default function UplistPage() {
           cursor: "pointer",
         }}
       >
-        등록
+        {submitting ? "등록 중..." : "등록"}
       </button>
     </div>
   );
