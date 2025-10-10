@@ -78,7 +78,7 @@ export default function SignUpPage() {
         });
 
         alert("회원가입 성공!");
-        router.push("/signin");
+        router.push("/sign/signin");
       } catch (error: any) {
         alert("회원가입 실패: " + error.message);
       }
