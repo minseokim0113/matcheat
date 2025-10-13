@@ -29,8 +29,12 @@ type Post = {
 
 const CATEGORIES = ["한식", "중식", "일식", "양식"];
 const LOCATIONS = [
-  "강남구", "서초구", "송파구", "마포구", "용산구",
-  "광진구", "중랑구", "성동구", "노원구", "강서구",
+  "강남구", "강동구", "강북구", "강서구",
+  "관악구", "광진구", "구로구", "금천구",
+  "노원구", "도봉구", "동대문구", "동작구",
+  "마포구", "서대문구", "서초구", "성동구",
+  "성북구", "송파구", "양천구", "영등포구",
+  "용산구", "은평구", "종로구", "중구", "중랑구",
 ];
 const GENDERS = ["성별 무관", "남성", "여성"];
 const MBTIS = [
@@ -46,6 +50,18 @@ export default function PostsPage() {
   const [loading, setLoading] = useState(true);
   const [editingPost, setEditingPost] = useState<Post | null>(null);
   const [editData, setEditData] = useState<Partial<Post>>({});
+  const [searchTerm, setSearchTerm] = useState("");
+  const [sortOption, setSortOption] = useState("latest");
+  const [filter, setFilter] = useState({ category: "", location: "" });
+
+  // ✅ Timestamp든 string이든 안전하게 변환하는 함수
+  const toDate = (val: any): Date => {
+    if (!val) return new Date(0);
+    if (typeof val === "string") return new Date(val);
+    if (val instanceof Date) return val;
+    if (val.toDate) return val.toDate(); // Firestore Timestamp 지원
+    return new Date(val);
+  };
 
   // 로그인 추적
   useEffect(() => {
@@ -121,10 +137,35 @@ export default function PostsPage() {
     }
   };
 
-  // 입력 변경 핸들러
+  // 입력 변경
   const handleChange = (key: keyof Post, value: any) => {
     setEditData((prev) => ({ ...prev, [key]: value }));
   };
+
+  // 🔍 검색 + 정렬 + 필터 처리
+  const filtered = posts
+    .filter((p) => {
+      const term = searchTerm.toLowerCase();
+      if (
+        !p.title?.toLowerCase().includes(term) &&
+        !p.content?.toLowerCase().includes(term)
+      )
+        return false;
+      if (filter.category && p.category !== filter.category) return false;
+      if (filter.location && p.location !== filter.location) return false;
+      return true;
+    })
+    .sort((a, b) => {
+      if (sortOption === "latest")
+        return toDate(b.createdAt).getTime() - toDate(a.createdAt).getTime();
+      if (sortOption === "oldest")
+        return toDate(a.createdAt).getTime() - toDate(b.createdAt).getTime();
+      if (sortOption === "title")
+        return (a.title || "").localeCompare(b.title || "");
+      if (sortOption === "category")
+        return (a.category || "").localeCompare(b.category || "");
+      return 0;
+    });
 
   if (loading)
     return (
@@ -135,14 +176,74 @@ export default function PostsPage() {
 
   return (
     <div style={{ padding: "2rem" }}>
-      <h1 style={{ fontSize: "1.5rem", fontWeight: "bold", marginBottom: "1.5rem" }}>
-        내가 쓴 글
+      <h1 style={{ fontSize: "1.6rem", fontWeight: "bold", marginBottom: "1.5rem" }}>
+        내가 쓴 글 ✍️
       </h1>
 
-      {posts.length === 0 ? (
-        <p style={{ color: "#6b7280" }}>아직 작성한 글이 없습니다.</p>
+      {/* 요약 정보 */}
+      <div
+        style={{
+          backgroundColor: "#f3f4f6",
+          borderRadius: "10px",
+          padding: "12px 16px",
+          marginBottom: "16px",
+          color: "#374151",
+        }}
+      >
+        📊 총 작성 글 수: <strong>{filtered.length}</strong> 개
+      </div>
+
+      {/* 검색 + 필터 + 정렬 */}
+      <div style={{ marginBottom: "1rem" }}>
+        <input
+          type="text"
+          placeholder="🔍 제목 또는 내용 검색"
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={inputStyle}
+        />
+
+        <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <select
+            value={filter.category}
+            onChange={(e) => setFilter({ ...filter, category: e.target.value })}
+            style={filterSelect}
+          >
+            <option value="">🍱 전체 카테고리</option>
+            {CATEGORIES.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </select>
+
+          <select
+            value={filter.location}
+            onChange={(e) => setFilter({ ...filter, location: e.target.value })}
+            style={filterSelect}
+          >
+            <option value="">📍 모든 지역</option>
+            {LOCATIONS.map((l) => (
+              <option key={l}>{l}</option>
+            ))}
+          </select>
+
+          <select
+            value={sortOption}
+            onChange={(e) => setSortOption(e.target.value)}
+            style={filterSelect}
+          >
+            <option value="latest">📅 최신순</option>
+            <option value="oldest">📜 오래된순</option>
+            <option value="title">🔤 제목순</option>
+            <option value="category">🍣 카테고리순</option>
+          </select>
+        </div>
+      </div>
+
+      {/* 게시글 리스트 */}
+      {filtered.length === 0 ? (
+        <p style={{ color: "#6b7280" }}>조건에 맞는 글이 없습니다.</p>
       ) : (
-        posts.map((post) => (
+        filtered.map((post) => (
           <div
             key={post.id}
             style={{
@@ -151,11 +252,11 @@ export default function PostsPage() {
               borderRadius: "12px",
               background: "white",
               marginBottom: "1rem",
+              boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
             }}
           >
             {editingPost?.id === post.id ? (
               <>
-                {/* 음식점 이름 */}
                 <input
                   value={editData.restaurant ?? ""}
                   placeholder="음식점 이름"
@@ -163,7 +264,6 @@ export default function PostsPage() {
                   style={inputStyle}
                 />
 
-                {/* 카테고리 선택 */}
                 <div style={{ marginBottom: "10px" }}>
                   {CATEGORIES.map((cat) => (
                     <button
@@ -181,7 +281,6 @@ export default function PostsPage() {
                   ))}
                 </div>
 
-                {/* 제목 & 내용 */}
                 <input
                   value={editData.title ?? ""}
                   placeholder="글 제목"
@@ -195,7 +294,6 @@ export default function PostsPage() {
                   style={{ ...inputStyle, height: "80px" }}
                 />
 
-                {/* 모집 인원 */}
                 <input
                   type="number"
                   value={editData.maxParticipants ?? ""}
@@ -206,7 +304,6 @@ export default function PostsPage() {
                   style={inputStyle}
                 />
 
-                {/* 장소 선택 */}
                 <select
                   value={editData.location ?? ""}
                   onChange={(e) => handleChange("location", e.target.value)}
@@ -220,10 +317,11 @@ export default function PostsPage() {
                   ))}
                 </select>
 
-                {/* 성별 선택 */}
                 <select
                   value={editData.preferredGender ?? ""}
-                  onChange={(e) => handleChange("preferredGender", e.target.value)}
+                  onChange={(e) =>
+                    handleChange("preferredGender", e.target.value)
+                  }
                   style={inputStyle}
                 >
                   {GENDERS.map((g) => (
@@ -233,7 +331,6 @@ export default function PostsPage() {
                   ))}
                 </select>
 
-                {/* MBTI 선택 */}
                 <div style={{ marginBottom: "10px" }}>
                   {MBTIS.map((m) => (
                     <button
@@ -261,7 +358,6 @@ export default function PostsPage() {
                   ))}
                 </div>
 
-                {/* 저장 & 취소 */}
                 <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
                   <button style={saveBtn} onClick={handleUpdate}>
                     저장
@@ -284,12 +380,7 @@ export default function PostsPage() {
                 <p style={{ color: "#9ca3af", fontSize: "0.8rem" }}>
                   작성일:{" "}
                   {post.createdAt &&
-                    new Date(
-                      typeof post.createdAt === "object" &&
-                        post.createdAt.toDate
-                        ? post.createdAt.toDate()
-                        : post.createdAt
-                    ).toLocaleString()}
+                    toDate(post.createdAt).toLocaleString()}
                 </p>
                 <div style={{ display: "flex", gap: "8px", marginTop: "8px" }}>
                   <button style={editBtn} onClick={() => startEditing(post)}>
@@ -325,6 +416,14 @@ const buttonStyle: React.CSSProperties = {
   cursor: "pointer",
   background: "white",
   color: "#2563eb",
+};
+
+const filterSelect: React.CSSProperties = {
+  flex: 1,
+  padding: "8px",
+  borderRadius: "6px",
+  border: "1px solid #ccc",
+  cursor: "pointer",
 };
 
 const editBtn = {
