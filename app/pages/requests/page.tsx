@@ -80,17 +80,13 @@ export default function RequestsPage() {
     fetchRequests();
   }, [currentUserId]);
 
-  // 받은 요청 처리 → 수락/거절
   const handleReceivedAction = async (reqId: string, action: "rejected" | "matched") => {
     await updateDoc(doc(db, "requests", reqId), { status: action });
-
-    // ✅ 로컬 상태 즉시 업데이트 → UI 바로 반영
     setReceivedRequests(prev =>
       prev.map(req => (req.id === reqId ? { ...req, status: action } : req))
     );
   };
 
-  // 요청 취소
   const handleCancelRequest = async (reqId: string) => {
     if (confirm("요청을 취소하시겠습니까?")) {
       await deleteDoc(doc(db, "requests", reqId));
@@ -107,7 +103,6 @@ export default function RequestsPage() {
     }
   };
 
-  // ✅ 채팅 연결 버튼
   const handleStartChat = async (req: Request) => {
     if (!currentUserId) return;
 
@@ -115,12 +110,10 @@ export default function RequestsPage() {
     const userB = req.toUserId;
 
     try {
-      // 1️⃣ 이미 두 사람이 포함된 방이 있는지 확인
       const q = query(collection(db, "chatRooms"), where("participants", "array-contains", currentUserId));
       const snapshot = await getDocs(q);
 
       let existingRoomId: string | null = null;
-
       snapshot.forEach((doc) => {
         const data = doc.data();
         if (data.participants.includes(userA) && data.participants.includes(userB)) {
@@ -128,13 +121,11 @@ export default function RequestsPage() {
         }
       });
 
-      // 2️⃣ 이미 존재하면 해당 방으로 이동
       if (existingRoomId) {
         router.push(`/pages/chat/${existingRoomId}`);
         return;
       }
 
-      // 3️⃣ 없으면 새 방 생성
       const newRoom = {
         participants: [userA, userB],
         lastMessage: "",
@@ -144,7 +135,6 @@ export default function RequestsPage() {
       const docRef = await addDoc(collection(db, "chatRooms"), newRoom);
       console.log("✅ 새 채팅방 생성:", docRef.id);
 
-      // 4️⃣ chatlist로 이동 (방이 생겼으므로 목록에 자동 반영)
       router.push("/pages/chatlist");
     } catch (error) {
       console.error("❌ 채팅방 생성 오류:", error);
@@ -208,7 +198,7 @@ export default function RequestsPage() {
                   </>
                 )}
 
-                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+                <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem", alignItems: "center" }}>
                   {req.status === "pending" ? (
                     <>
                       <button
@@ -238,8 +228,8 @@ export default function RequestsPage() {
                         거절
                       </button>
                     </>
-                  ) : (
-                    <>
+                  ) : req.status === "matched" ? (
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                       <span style={{ color: "#0275d8", fontWeight: "bold" }}>매치 완료</span>
                       <button
                         style={{
@@ -254,7 +244,9 @@ export default function RequestsPage() {
                       >
                         채팅으로 이동
                       </button>
-                    </>
+                    </div>
+                  ) : (
+                    <span style={{ color: "#d9534f", fontWeight: "bold" }}>거절됨</span>
                   )}
                 </div>
               </div>
@@ -303,6 +295,24 @@ export default function RequestsPage() {
                 >
                   요청 취소
                 </button>
+              )}
+              {req.status === "matched" && (
+                <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", marginTop: "0.5rem" }}>
+                  <span style={{ color: "#0275d8", fontWeight: "bold" }}>매치 완료</span>
+                  <button
+                    style={{
+                      backgroundColor: "#4f46e5",
+                      color: "white",
+                      border: "none",
+                      borderRadius: "5px",
+                      padding: "0.25rem 0.5rem",
+                      cursor: "pointer",
+                    }}
+                    onClick={() => handleStartChat(req)}
+                  >
+                    채팅으로 이동
+                  </button>
+                </div>
               )}
             </div>
           ))
