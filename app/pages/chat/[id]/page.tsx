@@ -10,6 +10,7 @@ import {
   serverTimestamp,
   doc,
   getDocs,
+  getDoc,                                                  //수정
 } from "firebase/firestore";
 import { db, auth } from "../../../../firebase";
 
@@ -25,10 +26,13 @@ export default function ChatRoom() {
   const params = useParams();
   const router = useRouter();
   const chatId = Array.isArray(params.id) ? params.id[0] : params.id;
+
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const bottomRef = useRef<HTMLDivElement>(null);
   const [usersMap, setUsersMap] = useState<Record<string, string>>({});
+  const [roomTitle, setRoomTitle] = useState(""); // 🔹 수정/추가: 방 제목
+  const [participants, setParticipants] = useState<string[]>([]); //수정
 
   // 🔹 모든 사용자 이름 한 번 가져오기
   useEffect(() => {
@@ -43,6 +47,21 @@ export default function ChatRoom() {
     };
     fetchUsers();
   }, []);
+
+  // 🔹 방 제목 가져오기
+  useEffect(() => {
+    const fetchRoomTitle = async () => {
+      if (!chatId) return;
+      const roomDocRef = doc(db, "chatRooms", chatId);
+      const roomSnap = await getDoc(roomDocRef);
+      if (roomSnap.exists()) {
+        const data = roomSnap.data();
+        setRoomTitle(data.title || "채팅방");
+        setParticipants(data.participants || []); // 🔹 수정/추가
+      }
+    };
+    fetchRoomTitle();
+  }, [chatId]);
 
   // 🔹 실시간 메시지 구독
   useEffect(() => {
@@ -91,7 +110,13 @@ export default function ChatRoom() {
 
   return (
     <div style={{ maxWidth: "600px", margin: "0 auto", padding: "20px" }}>
-      <h1 style={{ textAlign: "center" }}>채팅방</h1>
+      {/* 🔹 수정/추가: 방 제목 표시 */}
+      <h1 style={{ textAlign: "center" }}>{roomTitle}</h1>
+      {/* 🔹 참여자 표시 */}
+      <div style={{ textAlign: "center", fontSize: "14px", color: "#555", marginBottom: "10px" }}>
+        <strong>참여자:</strong>{" "}
+        {usersMap && participants?.map(uid => usersMap[uid] || uid).join(", ")}
+      </div>
 
       <div
         style={{
