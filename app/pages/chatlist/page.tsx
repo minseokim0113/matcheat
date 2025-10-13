@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { db, auth } from "../../../firebase";
-import { collection, onSnapshot, query, where, getDoc, doc } from "firebase/firestore";
+import { collection, onSnapshot, query, where, orderBy, getDoc, doc } from "firebase/firestore";
 import Link from "next/link";
 
 interface ChatRoom {
@@ -10,6 +10,7 @@ interface ChatRoom {
   participants: string[];
   lastMessage: string;
   lastUpdated?: any; // Timestamp | number | undefined 대응
+  title?: string; 
 }
 
 export default function ChatListPage() {
@@ -32,7 +33,8 @@ export default function ChatListPage() {
     // 🔁 orderBy 제거 (인덱스/타입 이슈 방지)
     const q = query(
       collection(db, "chatRooms"),
-      where("participants", "array-contains", currentUserId)
+      where("participants", "array-contains", currentUserId),
+      orderBy("lastUpdated", "desc")
     );
 
     const unsubscribe = onSnapshot(
@@ -45,6 +47,7 @@ export default function ChatListPage() {
             participants: data.participants || [],
             lastMessage: data.lastMessage || "",
             lastUpdated: data.lastUpdated ?? 0, // 없으면 0으로
+            title: data.title || "",
           };
         });
 
@@ -104,9 +107,18 @@ export default function ChatListPage() {
               >
                 <Link href={`/pages/chat/${room.id}`} style={{ textDecoration: "none", color: "inherit" }}>
                   <div>
-                    <strong>참여자:</strong> {otherNames.join(", ")}
+                    <div>
+                      <strong>채팅방 제목:</strong> {room.title || "제목 없음"}  {/* 🔹 수정/추가 */}
+                    </div>
+                    <div>
+                      <strong>참여자:</strong>{" "}
+                      {room.participants
+                        .filter(uid => uid !== currentUserId)
+                        .map(uid => usersMap[uid] || uid)
+                        .join(", ")}
+                    </div>
+                    <div>{room.lastMessage || "새 채팅"}</div>
                   </div>
-                  <div>{room.lastMessage || "새 채팅"}</div>
                 </Link>
               </li>
             );
