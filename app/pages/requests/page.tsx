@@ -1,11 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
-import { collection, query, where, getDocs, updateDoc, deleteDoc, doc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, query, where, getDocs, updateDoc, deleteDoc, doc, getDoc, addDoc, serverTimestamp, arrayUnion } from "firebase/firestore";
 import { db, auth } from "../../../firebase";
 import { useRouter } from "next/navigation";
 
 interface ChatRoom {
   id: string;
+  titles: string;  
   participants: string[];
   lastMessage: string;
 }
@@ -103,41 +104,44 @@ export default function RequestsPage() {
     }
   };
 
-  const handleStartChat = async (req: Request) => {
+  const handleStartChat = async (req: Request) => {                             //수정
     if (!currentUserId) return;
 
-    const userA = req.fromUserId;
-    const userB = req.toUserId;
-
     try {
-      const q = query(collection(db, "chatRooms"), where("participants", "array-contains", currentUserId));
+      const roomTitle = postsMap[req.postId]?.title || "제목 없음";
+
+      // 1️⃣ 글 제목으로 방 찾기
+      const q = query(collection(db, "chatRooms"), where("title", "==", roomTitle));
       const snapshot = await getDocs(q);
 
-      let existingRoomId: string | null = null;
-      snapshot.forEach((doc) => {
-        const data = doc.data();
-        if (data.participants.includes(userA) && data.participants.includes(userB)) {
-          existingRoomId = doc.id;
-        }
+      let chatRoomId: string | null = null;
+
+      snapshot.forEach(doc => {
+        chatRoomId = doc.id;
       });
 
-      if (existingRoomId) {
-        router.push(`/pages/chat/${existingRoomId}`);
+      // 2️⃣ 방이 이미 존재하면 participants에 현재 사용자 추가
+      if (chatRoomId) {
+        const roomRef = doc(db, "chatRooms", chatRoomId);
+        await updateDoc(roomRef, {
+          participants: arrayUnion(req.fromUserId) // 중복 없이 추가
+        });
+        router.push(`/pages/chat/${chatRoomId}`);
         return;
       }
 
+      // 3️⃣ 없으면 새 방 생성
       const newRoom = {
-        participants: [userA, userB],
+        title: roomTitle,
+        participants: [req.fromUserId, req.toUserId], // 첫 두 명
         lastMessage: "",
         lastUpdated: serverTimestamp(),
       };
 
       const docRef = await addDoc(collection(db, "chatRooms"), newRoom);
-      console.log("✅ 새 채팅방 생성:", docRef.id);
-
-      router.push("/pages/chatlist");
+      router.push(`/pages/chat/${docRef.id}`);
     } catch (error) {
-      console.error("❌ 채팅방 생성 오류:", error);
+      console.error("❌ 채팅방 생성/참여 오류:", error);
     }
   };
 
