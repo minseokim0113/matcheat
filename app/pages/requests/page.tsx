@@ -1,7 +1,14 @@
 "use client";
 import { useState, useEffect } from "react";
-import { collection, query, where, getDocs, updateDoc, deleteDoc, doc, getDoc } from "firebase/firestore"; // ✅ deleteDoc 추가
+import { collection, query, where, getDocs, updateDoc, deleteDoc, doc, getDoc, addDoc, serverTimestamp } from "firebase/firestore";
 import { db, auth } from "../../../firebase";
+import { useRouter } from "next/navigation";
+
+interface ChatRoom {
+  id: string;
+  participants: string[];
+  lastMessage: string;
+}
 
 type Request = {
   id: string;
@@ -18,11 +25,12 @@ type Post = {
 
 type User = {
   name: string;
-  location?: string;  // ✅ 위치 정보 추가
-  mbti?: string;      // ✅ MBTI 정보 추가
+  location?: string;
+  mbti?: string;
 };
 
 export default function RequestsPage() {
+  const router = useRouter();
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [receivedRequests, setReceivedRequests] = useState<Request[]>([]);
   const [sentRequests, setSentRequests] = useState<Request[]>([]);
@@ -30,31 +38,26 @@ export default function RequestsPage() {
   const [postsMap, setPostsMap] = useState<Record<string, Post>>({});
   const [usersMap, setUsersMap] = useState<Record<string, User>>({});
 
-  // ✅ 로그인한 사용자 정보 받아오기
   useEffect(() => {
     const unsubscribe = auth.onAuthStateChanged((user) => {
-      if (user) {
-        setCurrentUserId(user.uid);
-      }
+      if (user) setCurrentUserId(user.uid);
     });
     return () => unsubscribe();
   }, []);
 
   const fetchRequests = async () => {
-    if (!currentUserId) return; // ✅ fetchRequests() 안 확정x
-    // 받은 요청
+    if (!currentUserId) return;
+
     const receivedQuery = query(collection(db, "requests"), where("toUserId", "==", currentUserId));
     const receivedSnap = await getDocs(receivedQuery);
     const receivedData = receivedSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Request));
     setReceivedRequests(receivedData);
 
-    // 보낸 요청
     const sentQuery = query(collection(db, "requests"), where("fromUserId", "==", currentUserId));
     const sentSnap = await getDocs(sentQuery);
     const sentData = sentSnap.docs.map(doc => ({ id: doc.id, ...doc.data() } as Request));
     setSentRequests(sentData);
 
-    // 글 정보 가져오기
     const allPostIds = Array.from(new Set([...receivedData, ...sentData].map(r => r.postId)));
     const posts: Record<string, Post> = {};
     for (const postId of allPostIds) {
@@ -63,7 +66,6 @@ export default function RequestsPage() {
     }
     setPostsMap(posts);
 
-    // 사용자 정보 가져오기
     const userIds = Array.from(new Set([...receivedData, ...sentData].flatMap(r => [r.fromUserId, r.toUserId])));
     const users: Record<string, User> = {};
     for (const userId of userIds) {
@@ -74,30 +76,78 @@ export default function RequestsPage() {
   };
 
   useEffect(() => {
-    if (!currentUserId) return; // ✅ 확정x
+    if (!currentUserId) return;
     fetchRequests();
   }, [currentUserId]);
 
-  // 받은 요청 → 수락 / 거절
+  // 받은 요청 처리 → 수락/거절
   const handleReceivedAction = async (reqId: string, action: "rejected" | "matched") => {
     await updateDoc(doc(db, "requests", reqId), { status: action });
-    fetchRequests();
+
+    // ✅ 로컬 상태 즉시 업데이트 → UI 바로 반영
+    setReceivedRequests(prev =>
+      prev.map(req => (req.id === reqId ? { ...req, status: action } : req))
+    );
   };
 
-  // ✅ 보낸 요청 → 요청 취소
+  // 요청 취소
   const handleCancelRequest = async (reqId: string) => {
     if (confirm("요청을 취소하시겠습니까?")) {
       await deleteDoc(doc(db, "requests", reqId));
-      fetchRequests();
+      setSentRequests(prev => prev.filter(req => req.id !== reqId));
     }
   };
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "pending": return "#f0ad4e"; // 대기중
-      case "rejected": return "#d9534f"; // 거절됨
-      case "matched": return "#0275d8"; // 매칭완료
+      case "pending": return "#f0ad4e";
+      case "rejected": return "#d9534f";
+      case "matched": return "#0275d8";
       default: return "#ccc";
+    }
+  };
+
+  // ✅ 채팅 연결 버튼
+  const handleStartChat = async (req: Request) => {
+    if (!currentUserId) return;
+
+    const userA = req.fromUserId;
+    const userB = req.toUserId;
+
+    try {
+      // 1️⃣ 이미 두 사람이 포함된 방이 있는지 확인
+      const q = query(collection(db, "chatRooms"), where("participants", "array-contains", currentUserId));
+      const snapshot = await getDocs(q);
+
+      let existingRoomId: string | null = null;
+
+      snapshot.forEach((doc) => {
+        const data = doc.data();
+        if (data.participants.includes(userA) && data.participants.includes(userB)) {
+          existingRoomId = doc.id;
+        }
+      });
+
+      // 2️⃣ 이미 존재하면 해당 방으로 이동
+      if (existingRoomId) {
+        router.push(`/pages/chat/${existingRoomId}`);
+        return;
+      }
+
+      // 3️⃣ 없으면 새 방 생성
+      const newRoom = {
+        participants: [userA, userB],
+        lastMessage: "",
+        lastUpdated: serverTimestamp(),
+      };
+
+      const docRef = await addDoc(collection(db, "chatRooms"), newRoom);
+      console.log("✅ 새 채팅방 생성:", docRef.id);
+
+      // 4️⃣ chatlist로 이동 (방이 생겼으므로 목록에 자동 반영)
+      router.push("/pages/chatlist");
+    } catch (error) {
+      console.error("❌ 채팅방 생성 오류:", error);
     }
   };
 
@@ -136,7 +186,7 @@ export default function RequestsPage() {
       {/* 받은 요청 */}
       {activeTab === "received" &&
         (receivedRequests.length ? (
-          receivedRequests.map(req => {
+          receivedRequests.map((req) => {
             const sender = usersMap[req.fromUserId];
             return (
               <div
@@ -148,53 +198,64 @@ export default function RequestsPage() {
                   marginBottom: "0.75rem",
                 }}
               >
-                <p style={{ margin: "0.25rem 0" }}>
-                  <strong>글 제목:</strong> {postsMap[req.postId]?.title || req.postId}
-                </p>
-                <p style={{ margin: "0.25rem 0" }}>
-                  <strong>보낸 사람:</strong> {sender?.name || req.fromUserId}
-                </p>
+                <p><strong>글 제목:</strong> {postsMap[req.postId]?.title || req.postId}</p>
+                <p><strong>보낸 사람:</strong> {sender?.name || req.fromUserId}</p>
 
-                {/* ✅ 요청자 상세 정보 표시 */}
                 {sender && (
                   <>
-                    <p style={{ margin: "0.25rem 0" }}>
-                      <strong>위치:</strong> {sender.location || "비공개"}
-                    </p>
-                    <p style={{ margin: "0.25rem 0" }}>
-                      <strong>MBTI:</strong> {sender.mbti || "비공개"}
-                    </p>
+                    <p><strong>위치:</strong> {sender.location || "비공개"}</p>
+                    <p><strong>MBTI:</strong> {sender.mbti || "비공개"}</p>
                   </>
                 )}
 
-                {/* 수락/거절 버튼 */}
                 <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
-                  <button
-                    style={{
-                      backgroundColor: "#0275d8",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "5px",
-                      padding: "0.25rem 0.5rem",
-                      cursor: "pointer",
-                    }}
-                    onClick={() => handleReceivedAction(req.id, "matched")}
-                  >
-                    수락
-                  </button>
-                  <button
-                    style={{
-                      backgroundColor: "#d9534f",
-                      color: "white",
-                      border: "none",
-                      borderRadius: "5px",
-                      padding: "0.25rem 0.5rem",
-                      cursor: "pointer",
-                    }}
-                    onClick={() => handleReceivedAction(req.id, "rejected")}
-                  >
-                    거절
-                  </button>
+                  {req.status === "pending" ? (
+                    <>
+                      <button
+                        style={{
+                          backgroundColor: "#0275d8",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "5px",
+                          padding: "0.25rem 0.5rem",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => handleReceivedAction(req.id, "matched")}
+                      >
+                        수락
+                      </button>
+                      <button
+                        style={{
+                          backgroundColor: "#d9534f",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "5px",
+                          padding: "0.25rem 0.5rem",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => handleReceivedAction(req.id, "rejected")}
+                      >
+                        거절
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span style={{ color: "#0275d8", fontWeight: "bold" }}>매치 완료</span>
+                      <button
+                        style={{
+                          backgroundColor: "#4f46e5",
+                          color: "white",
+                          border: "none",
+                          borderRadius: "5px",
+                          padding: "0.25rem 0.5rem",
+                          cursor: "pointer",
+                        }}
+                        onClick={() => handleStartChat(req)}
+                      >
+                        채팅으로 이동
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             );
@@ -206,7 +267,7 @@ export default function RequestsPage() {
       {/* 보낸 요청 */}
       {activeTab === "sent" &&
         (sentRequests.length ? (
-          sentRequests.map(req => (
+          sentRequests.map((req) => (
             <div
               key={req.id}
               style={{
@@ -216,10 +277,8 @@ export default function RequestsPage() {
                 marginBottom: "0.75rem",
               }}
             >
-              <p style={{ margin: "0.25rem 0" }}>
-                <strong>글 제목:</strong> {postsMap[req.postId]?.title || req.postId}
-              </p>
-              <p style={{ margin: "0.25rem 0" }}>
+              <p><strong>글 제목:</strong> {postsMap[req.postId]?.title || req.postId}</p>
+              <p>
                 <strong>상태:</strong>{" "}
                 <span style={{ color: getStatusColor(req.status) }}>
                   {req.status === "pending"
@@ -229,8 +288,6 @@ export default function RequestsPage() {
                     : "거절됨"}
                 </span>
               </p>
-
-              {/* ✅ 요청 취소 버튼 */}
               {req.status === "pending" && (
                 <button
                   style={{
@@ -255,4 +312,3 @@ export default function RequestsPage() {
     </div>
   );
 }
-
