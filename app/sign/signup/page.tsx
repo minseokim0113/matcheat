@@ -1,9 +1,7 @@
 'use client';
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-
-// ✅ Firebase 불러오기
-import { auth, db } from "../../../firebase"; 
+import { auth, db } from "../../../firebase";
 import { createUserWithEmailAndPassword } from "firebase/auth";
 import { doc, setDoc } from "firebase/firestore";
 
@@ -12,22 +10,37 @@ export default function SignUpPage() {
   const [name, setName] = useState("");
   const [emailId, setEmailId] = useState("");
   const [emailDomain, setEmailDomain] = useState("");
-  const [customDomain, setCustomDomain] = useState(""); // ✅ 직접 입력용
+  const [customDomain, setCustomDomain] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [gender, setGender] = useState<"남성" | "여성" | null>(null);
   const [bio, setBio] = useState("");
 
+  // ✅ 추가: 사는 구, MBTI
+  const [district, setDistrict] = useState("");
+  const [mbti, setMbti] = useState("");
+
   const [errors, setErrors] = useState<{ [key: string]: string }>({});
   const [isFormValid, setIsFormValid] = useState(false);
 
   const emailDomains = ["gmail.com", "naver.com", "daum.net", "직접 입력"];
+  const seoulDistricts = [
+    "강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구",
+    "노원구","도봉구","동대문구","동작구","마포구","서대문구","서초구","성동구",
+    "성북구","송파구","양천구","영등포구","용산구","은평구","종로구","중구","중랑구"
+  ];
+  const mbtiList = [
+    "ISTJ","ISFJ","INFJ","INTJ",
+    "ISTP","ISFP","INFP","INTP",
+    "ESTP","ESFP","ENFP","ENTP",
+    "ESTJ","ESFJ","ENFJ","ENTJ"
+  ];
 
   const validateEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
   const validatePassword = (pw: string) =>
     /^(?=.*[A-Za-z])(?=.*\d)[A-Za-z\d@$!%*#?&]{8,15}$/.test(pw);
 
-  // ✅ 전체 유효성 검사
+  // ✅ 유효성 검사
   useEffect(() => {
     const domain = emailDomain === "직접 입력" ? customDomain : emailDomain;
     const fullEmail = `${emailId}@${domain}`;
@@ -36,9 +49,11 @@ export default function SignUpPage() {
       validateEmail(fullEmail) &&
       validatePassword(password) &&
       password === confirmPassword &&
-      bio.trim();
+      bio.trim() &&
+      district.trim() &&
+      mbti.trim();
     setIsFormValid(Boolean(valid));
-  }, [name, emailId, emailDomain, customDomain, password, confirmPassword, bio]);
+  }, [name, emailId, emailDomain, customDomain, password, confirmPassword, bio, district, mbti]);
 
   // ✅ 회원가입 처리
   const handleSubmit = async () => {
@@ -47,18 +62,12 @@ export default function SignUpPage() {
     const fullEmail = `${emailId}@${domain}`;
 
     if (!name.trim()) newErrors.name = "이름을 입력해주세요.";
-    if (!emailId || !domain || !validateEmail(fullEmail)) {
-      newErrors.email = "올바른 이메일을 입력해주세요.";
-    }
-    if (!validatePassword(password)) {
-      newErrors.password = "비밀번호는 8~15자, 영문+숫자를 포함해야 합니다.";
-    }
-    if (password !== confirmPassword) {
-      newErrors.confirmPassword = "비밀번호가 일치하지 않습니다.";
-    }
-    if (!bio.trim()) {
-      newErrors.bio = "자기소개를 입력해주세요.";
-    }
+    if (!emailId || !domain || !validateEmail(fullEmail)) newErrors.email = "올바른 이메일을 입력해주세요.";
+    if (!validatePassword(password)) newErrors.password = "비밀번호는 8~15자, 영문+숫자를 포함해야 합니다.";
+    if (password !== confirmPassword) newErrors.confirmPassword = "비밀번호가 일치하지 않습니다.";
+    if (!bio.trim()) newErrors.bio = "자기소개를 입력해주세요.";
+    if (!district) newErrors.district = "사는 구를 선택해주세요.";
+    if (!mbti) newErrors.mbti = "MBTI를 선택해주세요.";
 
     setErrors(newErrors);
 
@@ -67,12 +76,13 @@ export default function SignUpPage() {
         const userCredential = await createUserWithEmailAndPassword(auth, fullEmail, password);
         const user = userCredential.user;
 
-        // Firestore에 사용자 정보 저장
         await setDoc(doc(db, "users", user.uid), {
           name,
           email: fullEmail,
           gender,
           bio,
+          district, // ✅ 추가 저장
+          mbti,     // ✅ 추가 저장
           profileImage: "",
           createdAt: new Date(),
         });
@@ -133,14 +143,11 @@ export default function SignUpPage() {
         >
           <option value="">도메인 선택</option>
           {emailDomains.map((domain) => (
-            <option key={domain} value={domain}>
-              {domain}
-            </option>
+            <option key={domain} value={domain}>{domain}</option>
           ))}
         </select>
       </div>
 
-      {/* 직접 입력 input (선택한 경우만 표시) */}
       {emailDomain === "직접 입력" && (
         <div style={{ marginBottom: "16px" }}>
           <input
@@ -211,6 +218,46 @@ export default function SignUpPage() {
         </select>
       </div>
 
+      {/* ✅ 사는 구 선택 */}
+      <div style={{ marginBottom: "16px" }}>
+        <select
+          value={district}
+          onChange={(e) => setDistrict(e.target.value)}
+          style={{
+            width: "100%",
+            border: errors.district ? "2px solid red" : "1px solid #ccc",
+            padding: "8px",
+            borderRadius: "8px",
+          }}
+        >
+          <option value="">사는 구 선택</option>
+          {seoulDistricts.map((gu) => (
+            <option key={gu} value={gu}>{gu}</option>
+          ))}
+        </select>
+        {errors.district && <p style={{ color: "red", fontSize: "12px" }}>{errors.district}</p>}
+      </div>
+
+      {/* ✅ MBTI 선택 */}
+      <div style={{ marginBottom: "16px" }}>
+        <select
+          value={mbti}
+          onChange={(e) => setMbti(e.target.value)}
+          style={{
+            width: "100%",
+            border: errors.mbti ? "2px solid red" : "1px solid #ccc",
+            padding: "8px",
+            borderRadius: "8px",
+          }}
+        >
+          <option value="">MBTI 선택</option>
+          {mbtiList.map((type) => (
+            <option key={type} value={type}>{type}</option>
+          ))}
+        </select>
+        {errors.mbti && <p style={{ color: "red", fontSize: "12px" }}>{errors.mbti}</p>}
+      </div>
+
       {/* 자기소개 */}
       <div style={{ marginBottom: "16px" }}>
         <textarea
@@ -250,7 +297,7 @@ export default function SignUpPage() {
         이미 계정이 있나요?{" "}
         <span
           style={{ color: "#3b82f6", cursor: "pointer", fontWeight: "bold" }}
-          onClick={() => router.push("/signin")}
+          onClick={() => router.push("/sign/signin")}
         >
           로그인
         </span>
