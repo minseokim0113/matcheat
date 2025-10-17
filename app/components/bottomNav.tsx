@@ -1,67 +1,42 @@
-/*"use client";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
-
-export default function BottomNav() {
-  const pathname = usePathname();
-
-  const menus = [
-    { name: "지도", path: "/map" },
-    { name: "요청란", path: "/requests" },
-    { name: "홈", path: "/matches" },
-    { name: "채팅", path: "/chat" },
-    { name: "마이페이지", path: "/mypage" },
-  ];
-
-  return (
-    <nav
-      style={{
-        position: "fixed",
-        bottom: 0,
-        left: 0,
-        right: 0,
-        height: "60px",
-        display: "flex",
-        justifyContent: "space-around",
-        alignItems: "center",
-        backgroundColor: "#003366", // 진한 파랑
-        color: "white",
-        boxShadow: "0 -2px 5px rgba(0,0,0,0.1)",
-      }}
-    >
-      {menus.map((menu) => (
-        <Link
-          key={menu.path}
-          href={menu.path}
-          style={{
-            flex: 1,
-            textAlign: "center",
-            color: pathname === menu.path ? "#FFD700" : "white", // 현재 선택 메뉴 강조
-            textDecoration: "none",
-            fontWeight: pathname === menu.path ? "bold" : "normal",
-          }}
-        >
-          {menu.name}
-        </Link>
-      ))}
-    </nav>
-  );
-}
-*/
-
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FaMapMarkedAlt, FaClipboardList, FaHome, FaComments, FaUser } from "react-icons/fa";
+import { useEffect, useState } from "react";
+import { auth, db } from "@/firebase";
+import { collection, query, where, onSnapshot } from "firebase/firestore";
 
 export default function BottomNav() {
   const pathname = usePathname();
+  const [unreadTotal, setUnreadTotal] = useState(0);
+  const currentUserId = auth.currentUser?.uid;
+
+  // 🔹 안읽은 메시지 합산
+  useEffect(() => {
+    if (!currentUserId) return;
+
+    const q = query(
+      collection(db, "chatRooms"),
+      where("participants", "array-contains", currentUserId)
+    );
+
+    const unsubscribe = onSnapshot(q, snapshot => {
+      let total = 0;
+      snapshot.docs.forEach(doc => {
+        const data = doc.data();
+        total += data.unreadCount?.[currentUserId] ?? 0;
+      });
+      setUnreadTotal(total);
+    });
+
+    return () => unsubscribe();
+  }, [currentUserId]);
 
   const menus = [
     { name: "지도", path: "/pages/map", icon: <FaMapMarkedAlt /> },
     { name: "요청란", path: "/pages/requests", icon: <FaClipboardList /> },
     { name: "홈", path: "/pages/matches", icon: <FaHome /> },
-    { name: "채팅", path: "/pages/chat", icon: <FaComments /> },
+    { name: "채팅", path: "/pages/chatlist", icon: <FaComments />, badge: unreadTotal },
     { name: "마이페이지", path: "/pages/mypage", icon: <FaUser /> },
   ];
 
@@ -69,7 +44,7 @@ export default function BottomNav() {
     <nav
       style={{
         position: "fixed",
-        bottom: 10, // 화면 끝에서 살짝 띄우기
+        bottom: 10,
         left: 10,
         right: 10,
         height: "70px",
@@ -100,10 +75,29 @@ export default function BottomNav() {
               justifyContent: "center",
               fontWeight: isActive ? "bold" : "500",
               transition: "all 0.2s",
+              position: "relative", // 🔹 배지 위치 기준
             }}
           >
-            <div style={{ fontSize: "1.5rem", marginBottom: "2px" }}>
+            <div style={{ fontSize: "1.5rem", marginBottom: "2px", position: "relative" }}>
               {menu.icon}
+              {/* 🔹 채팅 배지 */}
+              {(menu.badge ?? 0) > 0 && (
+                <span
+                  style={{
+                    position: "absolute",
+                    top: -6,
+                    right: -10,
+                    backgroundColor: "red",
+                    color: "white",
+                    borderRadius: "50%",
+                    padding: "2px 6px",
+                    fontSize: "0.7rem",
+                    fontWeight: "bold",
+                  }}
+                >
+                  {menu.badge}
+                </span>
+              )}
             </div>
             <span style={{ fontSize: "0.85rem" }}>{menu.name}</span>
           </Link>
