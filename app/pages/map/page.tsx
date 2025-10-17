@@ -17,18 +17,18 @@ type PlaceItem = {
   category_name?: string;
 };
 
-type Category = "all" | "korean" | "chinese" | "western" | "japanese" | "cafe";
+type RecruitPost = {
+  id: string;
+  title?: string;
+  restaurant?: string;
+  authorId?: string;
+  authorName?: string;
+  lat?: number;
+  lng?: number;
+  place?: { lat?: number; lng?: number };
+};
 
-function haversine(lat1: number, lon1: number, lat2: number, lon2: number) {
-  const R = 6371;
-  const toRad = (v: number) => (v * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLon = toRad(lon2 - lon1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
-}
+type Category = "all" | "korean" | "chinese" | "western" | "japanese" | "cafe";
 
 function getPosition(opts: PositionOptions): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
@@ -41,6 +41,7 @@ export default function MapPage() {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const markersRef = useRef<any[]>([]);
+  const recruitMarkersRef = useRef<any[]>([]);
   const infoRef = useRef<any | null>(null);
   const myMarkerRef = useRef<any | null>(null);
   const myCircleRef = useRef<any | null>(null);
@@ -50,32 +51,38 @@ export default function MapPage() {
   const [activeCat, setActiveCat] = useState<Category>("all");
   const [results, setResults] = useState<PlaceItem[]>([]);
   const [selected, setSelected] = useState<PlaceItem | null>(null);
-  const [myLocationActive, setMyLocationActive] = useState(false);
-  const [log, setLog] = useState<string[]>([]);
-  const push = (m: string) => setLog((p) => [...p, m]);
+  const [recruitVisible, setRecruitVisible] = useState(false);
 
   const KAKAO_APPKEY = process.env.NEXT_PUBLIC_KAKAO_JS_KEY;
   if (!KAKAO_APPKEY) console.error("KAKAO JS KEY 누락");
 
-  // ✅ Firestore 모집글 불러오기 (작성자 정보 포함)
   const loadRecruitPosts = async () => {
     try {
       const kakao = (window as any).kakao;
       const snapshot = await getDocs(collection(db, "posts"));
-      const posts = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+      const posts: RecruitPost[] = snapshot.docs.map((d) => ({
+        id: d.id,
+        ...(d.data() as Omit<RecruitPost, "id">),
+      }));
+
+      recruitMarkersRef.current.forEach((m) => m.setMap(null));
+      recruitMarkersRef.current = [];
 
       for (const post of posts) {
         const lat = post.lat ?? post.place?.lat;
         const lng = post.lng ?? post.place?.lng;
         if (!lat || !lng) continue;
 
-        // ✅ 작성자 이름이 없으면 users 컬렉션에서 조회
         if (!post.authorName && post.authorId) {
           try {
-            const userDoc = await getDoc(doc(db, "users", post.authorId));
-            if (userDoc.exists()) post.authorName = userDoc.data().name || "익명";
-          } catch (e) {
-            console.warn("작성자 정보 조회 실패:", e);
+            const userRef = doc(db, "users", post.authorId);
+            const userDoc = await getDoc(userRef);
+            if (userDoc.exists()) {
+              const userData = userDoc.data() as { name?: string };
+              post.authorName = userData.name || "익명";
+            }
+          } catch (err) {
+            console.warn("작성자 불러오기 실패:", err);
           }
         }
 
@@ -88,24 +95,40 @@ export default function MapPage() {
             new kakao.maps.Size(30, 30)
           ),
         });
+        recruitMarkersRef.current.push(marker);
 
         const infoHtml = `
-          <div style="padding:8px;min-width:210px;">
-            <strong>${post.title || "제목 없음"}</strong><br/>
+          <div style="padding:10px;min-width:260px;max-width:300px;box-sizing:border-box;">
+            <strong style="display:block;margin-bottom:4px;">${post.title || "제목 없음"}</strong>
             🍽 ${post.restaurant || "미정"}<br/>
             👤 ${post.authorName || "작성자 미상"}<br/>
             <button id="post-${post.id}"
-              style="margin-top:6px;padding:5px 8px;background:#2563eb;color:white;border:none;border-radius:4px;cursor:pointer;">
+              style="margin-top:8px;padding:6px 10px;background:#2563eb;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">
               모집글 보러가기
             </button>
           </div>
         `;
-        const infoWindow = new kakao.maps.InfoWindow({ content: infoHtml });
+        const infoWindow = new kakao.maps.InfoWindow({
+          content: infoHtml,
+          zIndex: 5,
+          removable: false,
+          disableAutoPan: false,
+          pixelOffset: new kakao.maps.Point(0, -20),
+        });
 
         kakao.maps.event.addListener(marker, "click", () => {
+          if (infoRef.current && infoRef.current.marker === marker) {
+            infoRef.current.close();
+            infoRef.current = null;
+            return;
+          }
+
           if (infoRef.current) infoRef.current.close();
+
           infoWindow.open(mapRef.current, marker);
           infoRef.current = infoWindow;
+          infoRef.current.marker = marker;
+
           setTimeout(() => {
             const btn = document.getElementById(`post-${post.id}`);
             if (btn) btn.onclick = () => router.push(`/pages/matches/${post.id}`);
@@ -114,6 +137,17 @@ export default function MapPage() {
       }
     } catch (err) {
       console.error("❌ Firestore 로드 실패:", err);
+    }
+  };
+
+  const toggleRecruitPosts = async () => {
+    if (recruitVisible) {
+      recruitMarkersRef.current.forEach((m) => m.setMap(null));
+      recruitMarkersRef.current = [];
+      setRecruitVisible(false);
+    } else {
+      await loadRecruitPosts();
+      setRecruitVisible(true);
     }
   };
 
@@ -126,7 +160,6 @@ export default function MapPage() {
       level: 5,
     });
     mapRef.current = map;
-    loadRecruitPosts(); // ✅ 지도 로드 후 모집글 표시
     setTimeout(() => mapRef.current?.relayout(), 0);
   };
 
@@ -144,78 +177,8 @@ export default function MapPage() {
       s.async = true;
       s.onload = () => (window as any).kakao.maps.load(init);
       document.head.appendChild(s);
-    } else {
-      const retry = setInterval(() => {
-        if (w.kakao?.maps?.services) {
-          clearInterval(retry);
-          w.kakao.maps.load(init);
-        }
-      }, 300);
-      return () => clearInterval(retry);
     }
   }, [KAKAO_APPKEY]);
-
-  const clearMarkers = () => {
-    markersRef.current.forEach((m) => m.setMap(null));
-    markersRef.current = [];
-  };
-  const closeInfo = () => {
-    if (infoRef.current) {
-      infoRef.current.close();
-      infoRef.current = null;
-    }
-  };
-  const fitBoundsBy = (positions: any[]) => {
-    const kakao = (window as any).kakao;
-    const bounds = new kakao.maps.LatLngBounds();
-    positions.forEach((p) => bounds.extend(p));
-    if (!bounds.isEmpty()) mapRef.current.setBounds(bounds);
-  };
-
-  const goMyLocation = async (): Promise<boolean> => {
-    if (!mapRef.current) return false;
-    if (!("geolocation" in navigator)) {
-      alert("이 브라우저는 위치 서비스를 지원하지 않습니다.");
-      return false;
-    }
-    try {
-      const pos = await getPosition({ enableHighAccuracy: true });
-      const { latitude, longitude, accuracy } = pos.coords;
-      const kakao = (window as any).kakao;
-      const center = new kakao.maps.LatLng(latitude, longitude);
-      mapRef.current.setCenter(center);
-      mapRef.current.setLevel(4);
-      if (myMarkerRef.current) myMarkerRef.current.setMap(null);
-      if (myCircleRef.current) myCircleRef.current.setMap(null);
-      myMarkerRef.current = new kakao.maps.Marker({ position: center, map: mapRef.current });
-      const acc = Math.max(30, Math.min(accuracy || 200, 1500));
-      myCircleRef.current = new kakao.maps.Circle({
-        center,
-        radius: acc,
-        strokeWeight: 2,
-        strokeColor: "#1e90ff",
-        strokeOpacity: 0.85,
-        fillColor: "#1e90ff",
-        fillOpacity: 0.12,
-      });
-      myCircleRef.current.setMap(mapRef.current);
-      return true;
-    } catch (err) {
-      console.error("위치 오류", err);
-      return false;
-    }
-  };
-
-  const toggleMyLocation = async () => {
-    if (myLocationActive) {
-      if (myMarkerRef.current) myMarkerRef.current.setMap(null);
-      if (myCircleRef.current) myCircleRef.current.setMap(null);
-      setMyLocationActive(false);
-    } else {
-      const ok = await goMyLocation();
-      setMyLocationActive(!!ok);
-    }
-  };
 
   const runSearch = ({ keyword, categoryCode }: { keyword?: string; categoryCode?: string }) => {
     if (!mapRef.current) return;
@@ -224,67 +187,90 @@ export default function MapPage() {
       setTimeout(() => runSearch({ keyword, categoryCode }), 500);
       return;
     }
+
     const ps = new kakao.maps.services.Places();
-    const opts: any = {};
-    if (myMarkerRef.current) {
-      opts.location = myMarkerRef.current.getPosition();
-      opts.radius = radius;
-    } else {
-      opts.bounds = mapRef.current.getBounds();
-    }
-    const cb = (data: any[], status: string) => {
-      if (status !== kakao.maps.services.Status.OK) {
-        clearMarkers();
-        closeInfo();
-        setResults([]);
-        setSelected(null);
-        return;
-      }
-      let filtered = data;
-      if (activeCat === "korean")
-        filtered = data.filter((d) => (d.category_name || "").includes("한식"));
-      if (activeCat === "chinese")
-        filtered = data.filter((d) => (d.category_name || "").includes("중식"));
-      if (activeCat === "western")
-        filtered = data.filter((d) => (d.category_name || "").includes("양식"));
-      if (activeCat === "japanese")
-        filtered = data.filter((d) => (d.category_name || "").includes("일식"));
-      clearMarkers();
-      closeInfo();
-      setSelected(null);
+    const opts: any = {
+      location: myMarkerRef.current
+        ? myMarkerRef.current.getPosition()
+        : mapRef.current.getCenter(),
+      radius,
+    };
+
+    const showPlaces = (data: any[]) => {
+      markersRef.current.forEach((m) => m.setMap(null));
+      markersRef.current = [];
       const positions: any[] = [];
-      filtered.forEach((place) => {
+
+      data.forEach((place) => {
         const pos = new kakao.maps.LatLng(Number(place.y), Number(place.x));
-        positions.push(pos);
         const marker = new kakao.maps.Marker({ position: pos, map: mapRef.current });
         markersRef.current.push(marker);
+        positions.push(pos);
+
         const addr = place.road_address_name || place.address_name || "";
-        const content = `
-          <div style="padding:8px;min-width:210px;">
-            <strong>${place.place_name}</strong><br/>
-            <span style="color:#666;">${addr}</span><br/>
-          </div>`;
-        const info = new kakao.maps.InfoWindow({ content });
+        const infoHtml = `
+          <div style="padding:10px;min-width:260px;max-width:300px;box-sizing:border-box;">
+            <strong style="display:block;margin-bottom:4px;">${place.place_name}</strong>
+            <span style="color:#555;display:block;word-break:keep-all;">${addr}</span><br/>
+            <button id="write-${place.id}"
+              style="margin-top:8px;padding:6px 10px;background:#ef4444;color:white;border:none;border-radius:6px;cursor:pointer;white-space:nowrap;">
+              🍴 이 장소로 모집글 작성
+            </button>
+          </div>
+        `;
+        const info = new kakao.maps.InfoWindow({
+          content: infoHtml,
+          zIndex: 5,
+          removable: false,
+          disableAutoPan: false,
+          pixelOffset: new kakao.maps.Point(0, -20),
+        });
+
         kakao.maps.event.addListener(marker, "click", () => {
-          closeInfo();
+          if (infoRef.current && infoRef.current.marker === marker) {
+            infoRef.current.close();
+            infoRef.current = null;
+            return;
+          }
+
+          if (infoRef.current) infoRef.current.close();
           info.open(mapRef.current, marker);
           infoRef.current = info;
-          setSelected({
-            id: place.id,
-            place_name: place.place_name,
-            address_name: place.address_name,
-            road_address_name: place.road_address_name,
-            phone: place.phone,
-            place_url: place.place_url,
-            x: place.x,
-            y: place.y,
-            category_name: place.category_name,
-          });
+          infoRef.current.marker = marker;
+
+          setTimeout(() => {
+            const btn = document.getElementById(`write-${place.id}`);
+            if (btn) {
+              btn.onclick = () => {
+                const url = `/pages/matches/uplist?source=map&placeId=${encodeURIComponent(
+                  place.id
+                )}&placeName=${encodeURIComponent(place.place_name)}&lat=${encodeURIComponent(
+                  place.y
+                )}&lng=${encodeURIComponent(place.x)}&category=${encodeURIComponent(activeCat)}`;
+                router.push(url);
+              };
+            }
+          }, 100);
         });
       });
-      if (positions.length) fitBoundsBy(positions);
-      setResults(filtered as PlaceItem[]);
+
+      if (positions.length) {
+        const bounds = new kakao.maps.LatLngBounds();
+        positions.forEach((p) => bounds.extend(p));
+        mapRef.current.setBounds(bounds);
+      }
+
+      setResults(data as PlaceItem[]);
     };
+
+    const cb = (data: any[], status: string) => {
+      if (status === kakao.maps.services.Status.OK) {
+        showPlaces(data);
+      } else {
+        console.warn("검색 실패 또는 결과 없음");
+      }
+    };
+
     if (categoryCode) ps.categorySearch(categoryCode, cb, opts);
     else ps.keywordSearch(keyword || "맛집", cb, opts);
   };
@@ -299,20 +285,14 @@ export default function MapPage() {
     return runSearch({ keyword: q || "맛집" });
   };
 
-  useEffect(() => {
-    if (myCircleRef.current) myCircleRef.current.setRadius(radius);
-  }, [radius]);
-
-  useEffect(() => {
-    const t = setTimeout(() => handleCategory("all"), 400);
-    return () => clearTimeout(t);
-  }, []);
-
   const goRecruitFromSelected = (p?: PlaceItem) => {
     const target = p ?? selected;
     if (!target) return;
-    const url =
-      `/pages/matches/uplist?source=map&placeId=${encodeURIComponent(target.id)}&placeName=${encodeURIComponent(target.place_name)}&lat=${encodeURIComponent(target.y)}&lng=${encodeURIComponent(target.x)}`;
+    const url = `/pages/matches/uplist?source=map&placeId=${encodeURIComponent(
+      target.id
+    )}&placeName=${encodeURIComponent(target.place_name)}&lat=${encodeURIComponent(
+      target.y
+    )}&lng=${encodeURIComponent(target.x)}&category=${encodeURIComponent(activeCat)}`;
     router.push(url);
   };
 
@@ -337,25 +317,15 @@ export default function MapPage() {
         </button>
 
         <button
-          onClick={toggleMyLocation}
-          className={`px-4 py-2.5 border rounded-lg text-sm ${
-            myLocationActive ? "bg-red-500 text-white" : "hover:bg-gray-50"
+          onClick={toggleRecruitPosts}
+          className={`px-4 py-2.5 border rounded-lg text-sm transition-colors ${
+            recruitVisible
+              ? "bg-blue-600 text-white hover:bg-blue-700"
+              : "bg-white text-blue-600 hover:bg-blue-100"
           }`}
         >
-          📍 내 위치
+          📢 모집글 {recruitVisible ? "끄기" : "보기"}
         </button>
-
-        <label className="ml-2 text-sm text-gray-600">반경</label>
-        <select
-          value={radius}
-          onChange={(e) => setRadius(Number(e.target.value))}
-          className="px-2 py-2 border rounded"
-        >
-          <option value={1000}>1km</option>
-          <option value={2000}>2km</option>
-          <option value={3000}>3km</option>
-          <option value={5000}>5km</option>
-        </select>
       </div>
 
       {/* 🍱 카테고리 버튼 바 */}
@@ -384,26 +354,42 @@ export default function MapPage() {
       <div ref={containerRef} style={{ height: 600 }} className="w-full rounded-xl border" />
 
       {/* 📋 검색 결과 목록 */}
-      <div className="max-h-[400px] overflow-auto mt-4 border p-2 rounded-lg">
-        <div className="text-sm font-semibold mb-2">{`검색 결과 (${results.length}건)`}</div>
-        {results.map((p) => (
-          <div key={p.id} className="py-2 border-b last:border-0">
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="font-medium">{p.place_name}</div>
-                <div className="text-xs text-gray-600">
-                  {(p.road_address_name || p.address_name || "").slice(0, 60)}
+      <div className="max-h-[400px] overflow-auto mt-4 border p-3 rounded-lg bg-white shadow-sm">
+        <div className="text-sm font-semibold mb-3 text-gray-700">
+          🔍 검색 결과 ({results.length}건)
+        </div>
+
+        {results.length === 0 ? (
+          <p className="text-sm text-gray-500">검색 결과가 없습니다.</p>
+        ) : (
+          results.map((p) => (
+            <div
+              key={p.id}
+              className="flex justify-between items-center p-3 mb-3 border border-gray-200 rounded-xl hover:shadow-md hover:bg-gray-50 transition-all"
+            >
+              <div className="flex flex-col w-[80%] pr-4">
+                <div className="flex items-center gap-1 text-[15px] font-semibold text-gray-800">
+                  <span>🍽</span>
+                  <span className="truncate">{p.place_name}</span>
+                </div>
+
+                <div className="flex items-center gap-1 text-xs text-gray-600 mt-1 leading-snug">
+                  <span>📍</span>
+                  <span className="truncate">
+                    {p.road_address_name || p.address_name || "주소 정보 없음"}
+                  </span>
                 </div>
               </div>
+
               <button
-                className="px-2 py-1 bg-rose-500 text-white text-xs rounded"
+                className="ml-auto px-4 py-2 bg-rose-500 text-white text-xs rounded-lg hover:bg-rose-600 transition-all shadow-sm whitespace-nowrap"
                 onClick={() => goRecruitFromSelected(p)}
               >
                 🍴 모집하기
               </button>
             </div>
-          </div>
-        ))}
+          ))
+        )}
       </div>
     </div>
   );
