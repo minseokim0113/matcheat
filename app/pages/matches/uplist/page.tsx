@@ -1,6 +1,5 @@
 "use client";
-
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { addDoc, collection, doc, setDoc, Timestamp } from "firebase/firestore";
 import { db, auth } from "../../../../firebase";
@@ -75,12 +74,8 @@ export default function UplistPage() {
   const [preferredGender, setPreferredGender] = useState("");
   const [preferredMbti, setPreferredMbti] = useState<string[]>([]);
   const [chatLink, setChatLink] = useState("");
-  const [lat, setLat] = useState<number | null>(
-    latParam ? Number(latParam) : null
-  );
-  const [lng, setLng] = useState<number | null>(
-    lngParam ? Number(lngParam) : null
-  );
+  const [lat, setLat] = useState<number | null>(latParam ? Number(latParam) : null);
+  const [lng, setLng] = useState<number | null>(lngParam ? Number(lngParam) : null);
 
   // 모임 시간
   const [meetDate, setMeetDate] = useState("");
@@ -120,7 +115,7 @@ export default function UplistPage() {
       setRestaurant(placeName);
       setTitle(`${placeName} 같이 가실 분?`);
     }
-  }, [source, placeName]);
+  }, [source, placeName, restaurant]);
 
   // ✅ 지도 로드 (source가 없을 때만 표시)
   useEffect(() => {
@@ -136,6 +131,7 @@ export default function UplistPage() {
         level: 4,
       });
 
+      // Geocoder는 libraries=services 필요 (아래 script에서 로드)
       const geocoder = new kakao.maps.services.Geocoder();
 
       kakao.maps.event.addListener(map, "click", (mouseEvent: any) => {
@@ -175,9 +171,7 @@ export default function UplistPage() {
   // MBTI 토글
   const toggleMbti = (mbti: string) => {
     setPreferredMbti((prev) =>
-      prev.includes(mbti)
-        ? prev.filter((m) => m !== mbti)
-        : [...prev, mbti]
+      prev.includes(mbti) ? prev.filter((m) => m !== mbti) : [...prev, mbti]
     );
   };
 
@@ -200,6 +194,7 @@ export default function UplistPage() {
       const meetAtTs = getMeetAt();
 
       const payload: any = {
+
         authorId: currentUserId,
         authorName: currentUserName,
         title,
@@ -211,9 +206,14 @@ export default function UplistPage() {
         preferredMbti,
         maxParticipants,
         status: "open",
+        participantsCount: 1,
         chatLink: chatLink || null,
-        createdAt: Timestamp.now(),
+        createdAt: Timestamp.now(),        
       };
+      // 정원이 1명인 글은 즉시 마감
+      if (maxParticipants === 1) {
+      payload.status = "closed";
+      }
 
       // 지도에서 온 경우 + 수동 지도 클릭 모두 처리
       payload.place = {
@@ -230,12 +230,19 @@ export default function UplistPage() {
       // Firestore 등록
       const postRef = await addDoc(collection(db, "posts"), payload);
 
-      // 작성자 자동 참가
+      // 작성자 자동 참가 (서브컬렉션)
       await setDoc(doc(db, "posts", postRef.id, "participants", currentUserId), {
         uid: currentUserId,
         name: currentUserName,
         joinedAt: Timestamp.now(),
       });
+
+      // ✅ 상위 문서에 초기 참여자 수 반영
+      await setDoc(
+        doc(db, "posts", postRef.id),
+        { participantsCount: 1 },
+        { merge: true }
+      );
 
       // ICS 자동 다운로드
       if (meetAtTs) {
@@ -366,15 +373,9 @@ export default function UplistPage() {
               style={{
                 padding: "6px 8px",
                 borderRadius: 8,
-                border: preferredMbti.includes(mbti)
-                  ? "2px solid #003366"
-                  : "1px solid #ccc",
-                backgroundColor: preferredMbti.includes(mbti)
-                  ? "#003366"
-                  : "white",
-                color: preferredMbti.includes(mbti)
-                  ? "white"
-                  : "#003366",
+                border: preferredMbti.includes(mbti) ? "2px solid #003366" : "1px solid #ccc",
+                backgroundColor: preferredMbti.includes(mbti) ? "#003366" : "white",
+                color: preferredMbti.includes(mbti) ? "white" : "#003366",
                 cursor: "pointer",
               }}
             >
@@ -384,14 +385,7 @@ export default function UplistPage() {
         </div>
       </div>
 
-      <input
-        type="url"
-        placeholder="오픈채팅/연락 링크 (선택)"
-        value={chatLink}
-        onChange={(e) => setChatLink(e.target.value)}
-        style={{ width: "100%", padding: "10px", marginBottom: 12 }}
-      />
-
+      
       <button
         onClick={handleSubmit}
         style={{
@@ -408,4 +402,3 @@ export default function UplistPage() {
     </div>
   );
 }
-
