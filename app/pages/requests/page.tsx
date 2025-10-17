@@ -12,6 +12,8 @@ interface ChatRoom {
   titles: string;
   participants: string[];
   lastMessage: string;
+  lastUpdated?: any;
+  unreadCount?: { [uid: string]: number };
 }
 type Request = {
   id: string;
@@ -150,29 +152,40 @@ export default function RequestsPage() {
     }
   };
 
-  const handleStartChat = async (req: Request) => {
+  const handleStartChat = async (req: Request) => {                             //수정
     if (!currentUserId) return;
+
     try {
       const roomTitle = postsMap[req.postId]?.title || "제목 없음";
-      const qy = query(collection(db, "chatRooms"), where("title", "==", roomTitle));
-      const snapshot = await getDocs(qy);
+
+      // 1️⃣ 글 제목으로 방 찾기
+      const q = query(collection(db, "chatRooms"), where("title", "==", roomTitle));
+      const snapshot = await getDocs(q);
 
       let chatRoomId: string | null = null;
-      snapshot.forEach(d => { chatRoomId = d.id; });
 
+      snapshot.forEach(doc => {
+        chatRoomId = doc.id;
+      });
+
+      // 2️⃣ 방이 이미 존재하면 participants에 현재 사용자 추가
       if (chatRoomId) {
         const roomRef = doc(db, "chatRooms", chatRoomId);
-        await updateDoc(roomRef, { participants: arrayUnion(req.fromUserId) });
+        await updateDoc(roomRef, {
+          participants: arrayUnion(req.fromUserId) // 중복 없이 추가
+        });
         router.push(`/pages/chat/${chatRoomId}`);
         return;
       }
 
+      // 3️⃣ 없으면 새 방 생성
       const newRoom = {
         title: roomTitle,
-        participants: [req.fromUserId, req.toUserId],
+        participants: [req.fromUserId, req.toUserId], // 첫 두 명
         lastMessage: "",
         lastUpdated: serverTimestamp(),
       };
+
       const docRef = await addDoc(collection(db, "chatRooms"), newRoom);
       router.push(`/pages/chat/${docRef.id}`);
     } catch (error) {
