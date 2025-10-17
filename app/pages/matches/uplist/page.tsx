@@ -54,7 +54,7 @@ export default function UplistPage() {
   const sp = useSearchParams();
 
   // 지도에서 넘어온 데이터
-  const source = sp.get("source"); // 'map' | null
+  const source = sp.get("source");
   const placeId = sp.get("placeId");
   const placeName = sp.get("placeName");
   const latParam = sp.get("lat");
@@ -68,16 +68,15 @@ export default function UplistPage() {
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [restaurant, setRestaurant] = useState("");
-  const [category, setCategory] = useState("한식");
+  const [category, setCategory] = useState(""); // ✅ 선택 안된 상태
   const [maxParticipants, setMaxParticipants] = useState<number>(2);
-  const [location, setLocation] = useState(""); // 도로명 주소 자동저장
+  const [location, setLocation] = useState("");
   const [preferredGender, setPreferredGender] = useState("");
   const [preferredMbti, setPreferredMbti] = useState<string[]>([]);
   const [chatLink, setChatLink] = useState("");
   const [lat, setLat] = useState<number | null>(latParam ? Number(latParam) : null);
   const [lng, setLng] = useState<number | null>(lngParam ? Number(lngParam) : null);
 
-  // 모임 시간
   const [meetDate, setMeetDate] = useState("");
   const [meetTime, setMeetTime] = useState("19:00");
 
@@ -119,7 +118,7 @@ export default function UplistPage() {
 
   // ✅ 지도 로드 (source가 없을 때만 표시)
   useEffect(() => {
-    if (source === "map") return; // 지도에서 넘어온 경우 지도 렌더 X
+    if (source === "map") return;
 
     const loadMap = () => {
       const w = window as any;
@@ -131,7 +130,6 @@ export default function UplistPage() {
         level: 4,
       });
 
-      // Geocoder는 libraries=services 필요 (아래 script에서 로드)
       const geocoder = new kakao.maps.services.Geocoder();
 
       kakao.maps.event.addListener(map, "click", (mouseEvent: any) => {
@@ -175,7 +173,6 @@ export default function UplistPage() {
     );
   };
 
-  // meetAt Timestamp 변환
   const getMeetAt = (): Timestamp | null => {
     if (!meetDate || !meetTime) return null;
     const [hh, mm] = meetTime.split(":").map(Number);
@@ -184,17 +181,16 @@ export default function UplistPage() {
     return Timestamp.fromDate(d);
   };
 
-  // ✅ 등록
   const handleSubmit = async () => {
     if (!currentUserId) return alert("로그인이 필요합니다.");
     if (!title || !restaurant) return alert("음식점 이름과 제목은 필수입니다.");
     if (!lat || !lng) return alert("위치를 선택해주세요.");
+    if (!category) return alert("카테고리를 선택해주세요."); // ✅ 추가된 유효성 검사
 
     try {
       const meetAtTs = getMeetAt();
 
       const payload: any = {
-
         authorId: currentUserId,
         authorName: currentUserName,
         title,
@@ -208,14 +204,13 @@ export default function UplistPage() {
         status: "open",
         participantsCount: 1,
         chatLink: chatLink || null,
-        createdAt: Timestamp.now(),        
+        createdAt: Timestamp.now(),
       };
-      // 정원이 1명인 글은 즉시 마감
+
       if (maxParticipants === 1) {
-      payload.status = "closed";
+        payload.status = "closed";
       }
 
-      // 지도에서 온 경우 + 수동 지도 클릭 모두 처리
       payload.place = {
         id: placeId || null,
         name: placeName || restaurant,
@@ -227,24 +222,20 @@ export default function UplistPage() {
       if (source === "map") payload.source = "map";
       if (meetAtTs) payload.meetAt = meetAtTs;
 
-      // Firestore 등록
       const postRef = await addDoc(collection(db, "posts"), payload);
 
-      // 작성자 자동 참가 (서브컬렉션)
       await setDoc(doc(db, "posts", postRef.id, "participants", currentUserId), {
         uid: currentUserId,
         name: currentUserName,
         joinedAt: Timestamp.now(),
       });
 
-      // ✅ 상위 문서에 초기 참여자 수 반영
       await setDoc(
         doc(db, "posts", postRef.id),
         { participantsCount: 1 },
         { merge: true }
       );
 
-      // ICS 자동 다운로드
       if (meetAtTs) {
         downloadICS({
           title: `[밥친구] ${restaurant}`,
@@ -302,7 +293,7 @@ export default function UplistPage() {
       />
 
       <div style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {categories.map((cat) => (
+        {["한식", "중식", "일식", "양식", "카페"].map((cat) => (
           <button
             key={cat}
             onClick={() => setCategory(cat)}
@@ -373,9 +364,15 @@ export default function UplistPage() {
               style={{
                 padding: "6px 8px",
                 borderRadius: 8,
-                border: preferredMbti.includes(mbti) ? "2px solid #003366" : "1px solid #ccc",
-                backgroundColor: preferredMbti.includes(mbti) ? "#003366" : "white",
-                color: preferredMbti.includes(mbti) ? "white" : "#003366",
+                border: preferredMbti.includes(mbti)
+                  ? "2px solid #003366"
+                  : "1px solid #ccc",
+                backgroundColor: preferredMbti.includes(mbti)
+                  ? "#003366"
+                  : "white",
+                color: preferredMbti.includes(mbti)
+                  ? "white"
+                  : "#003366",
                 cursor: "pointer",
               }}
             >
@@ -385,7 +382,6 @@ export default function UplistPage() {
         </div>
       </div>
 
-      
       <button
         onClick={handleSubmit}
         style={{
