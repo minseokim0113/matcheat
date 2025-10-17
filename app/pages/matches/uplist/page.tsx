@@ -1,21 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  addDoc,
-  collection,
-  doc,
-  setDoc,
-  Timestamp,
-} from "firebase/firestore";
-import { db, auth } from "../../../../../firebase";
+import { addDoc, collection, doc, setDoc, Timestamp } from "firebase/firestore";
+import { db, auth } from "../../../../firebase";
 
-// 간단 ICS 생성기
+// ✅ ICS 생성 함수
 function downloadICS({
   title,
   description,
-  startAt, // Date
+  startAt,
   durationMinutes = 90,
   locationText,
 }: {
@@ -26,16 +20,13 @@ function downloadICS({
   locationText?: string;
 }) {
   const dt = (d: Date) =>
-    d
-      .toISOString()
-      .replace(/[-:]/g, "")
-      .replace(/\.\d{3}Z$/, "Z");
+    d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 
   const end = new Date(startAt.getTime() + durationMinutes * 60 * 1000);
   const ics = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//LunchMate//EN",
+    "PRODID:-//MatchEat//EN",
     "CALSCALE:GREGORIAN",
     "BEGIN:VEVENT",
     `DTSTAMP:${dt(new Date())}`,
@@ -54,7 +45,7 @@ function downloadICS({
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "event.ics";
+  a.download = "match_eat_event.ics";
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -63,58 +54,58 @@ export default function UplistPage() {
   const router = useRouter();
   const sp = useSearchParams();
 
-  // 지도에서 온 파라미터
+  // 지도에서 넘어온 데이터
   const source = sp.get("source"); // 'map' | null
   const placeId = sp.get("placeId");
   const placeName = sp.get("placeName");
-  const lat = sp.get("lat");
-  const lng = sp.get("lng");
+  const latParam = sp.get("lat");
+  const lngParam = sp.get("lng");
 
+  // 로그인 상태
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>("");
 
-  // 폼 상태
+  // 입력 상태
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [restaurant, setRestaurant] = useState("");
   const [category, setCategory] = useState("한식");
   const [maxParticipants, setMaxParticipants] = useState<number>(2);
-
-  const [location, setLocation] = useState(""); // 서울 구 단위
+  const [location, setLocation] = useState(""); // 도로명 주소 자동저장
   const [preferredGender, setPreferredGender] = useState("");
   const [preferredMbti, setPreferredMbti] = useState<string[]>([]);
-  const [chatLink, setChatLink] = useState(""); // 오픈채팅/링크
+  const [chatLink, setChatLink] = useState("");
+  const [lat, setLat] = useState<number | null>(
+    latParam ? Number(latParam) : null
+  );
+  const [lng, setLng] = useState<number | null>(
+    lngParam ? Number(lngParam) : null
+  );
 
-  // 모임 시간: 날짜 + 시간(로컬)
-  const [meetDate, setMeetDate] = useState<string>(""); // yyyy-mm-dd
-  const [meetTime, setMeetTime] = useState<string>("19:00"); // HH:mm
+  // 모임 시간
+  const [meetDate, setMeetDate] = useState("");
+  const [meetTime, setMeetTime] = useState("19:00");
+
+  const mapRef = useRef<HTMLDivElement | null>(null);
+  const markerRef = useRef<any>(null);
 
   const categories = ["한식", "중식", "일식", "양식", "카페"];
-  const SEOUL_DISTRICTS = [
-    "강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구",
-    "노원구","도봉구","동대문구","동작구","마포구","서대문구","서초구",
-    "성동구","성북구","송파구","양천구","영등포구","용산구","은평구",
-    "종로구","중구","중랑구",
-  ] as const;
-
   const MBTI_TYPES = [
-    "INTJ","INTP","ENTJ","ENTP",
-    "INFJ","INFP","ENFJ","ENFP",
-    "ISTJ","ISFJ","ESTJ","ESFJ",
-    "ISTP","ISFP","ESTP","ESFP",
+    "INTJ","INTP","ENTJ","ENTP","INFJ","INFP","ENFJ","ENFP",
+    "ISTJ","ISFJ","ESTJ","ESFJ","ISTP","ISFP","ESTP","ESFP",
   ];
 
-  // 로그인
+  // 로그인 감시
   useEffect(() => {
     const u = auth.currentUser;
     if (u) {
       setCurrentUserId(u.uid);
-      setCurrentUserName(u.displayName || "");
+      setCurrentUserName(u.displayName || "익명");
     }
     const unsub = auth.onAuthStateChanged((user) => {
       if (user) {
         setCurrentUserId(user.uid);
-        setCurrentUserName(user.displayName || "");
+        setCurrentUserName(user.displayName || "익명");
       } else {
         setCurrentUserId(null);
         setCurrentUserName("");
@@ -123,66 +114,91 @@ export default function UplistPage() {
     return () => unsub();
   }, []);
 
-  // 지도에서 오면 프리필
+  // 지도에서 왔을 때 자동 입력
   useEffect(() => {
-    if (source === "map") {
-      if (placeName && !restaurant) setRestaurant(placeName);
-      if (placeName && !title) setTitle(`${placeName} 같이 가실 분?`);
+    if (source === "map" && placeName && !restaurant) {
+      setRestaurant(placeName);
+      setTitle(`${placeName} 같이 가실 분?`);
     }
-  }, [source, placeName, restaurant, title]);
+  }, [source, placeName]);
 
+  // ✅ 지도 로드 (source가 없을 때만 표시)
+  useEffect(() => {
+    if (source === "map") return; // 지도에서 넘어온 경우 지도 렌더 X
+
+    const loadMap = () => {
+      const w = window as any;
+      const kakao = w.kakao;
+      if (!kakao?.maps || !mapRef.current) return;
+
+      const map = new kakao.maps.Map(mapRef.current, {
+        center: new kakao.maps.LatLng(37.5665, 126.978),
+        level: 4,
+      });
+
+      const geocoder = new kakao.maps.services.Geocoder();
+
+      kakao.maps.event.addListener(map, "click", (mouseEvent: any) => {
+        const latlng = mouseEvent.latLng;
+        if (markerRef.current) markerRef.current.setMap(null);
+        markerRef.current = new kakao.maps.Marker({ position: latlng, map });
+
+        const latValue = latlng.getLat();
+        const lngValue = latlng.getLng();
+
+        setLat(latValue);
+        setLng(lngValue);
+
+        geocoder.coord2Address(lngValue, latValue, (result: any, status: any) => {
+          if (status === kakao.maps.services.Status.OK) {
+            const addr =
+              result[0].road_address?.address_name ||
+              result[0].address.address_name;
+            setLocation(addr);
+          }
+        });
+      });
+    };
+
+    const w = window as any;
+    if (w.kakao?.maps && w.kakao.maps.services) {
+      w.kakao.maps.load(loadMap);
+    } else {
+      const script = document.createElement("script");
+      script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${process.env.NEXT_PUBLIC_KAKAO_JS_KEY}&libraries=services&autoload=false`;
+      script.async = true;
+      script.onload = () => (window as any).kakao.maps.load(loadMap);
+      document.head.appendChild(script);
+    }
+  }, [source]);
+
+  // MBTI 토글
   const toggleMbti = (mbti: string) => {
     setPreferredMbti((prev) =>
-      prev.includes(mbti) ? prev.filter((m) => m !== mbti) : [...prev, mbti]
+      prev.includes(mbti)
+        ? prev.filter((m) => m !== mbti)
+        : [...prev, mbti]
     );
   };
 
-  const fromMapBadge = useMemo(
-    () =>
-      source === "map" ? (
-        <span
-          style={{
-            marginLeft: "0.5rem",
-            fontSize: "0.75rem",
-            padding: "0.1rem 0.4rem",
-            borderRadius: "6px",
-            backgroundColor: "#ffe4e6",
-            color: "#be123c",
-            border: "1px solid #fecdd3",
-          }}
-        >
-          지도에서 작성됨
-        </span>
-      ) : null,
-    [source]
-  );
-
-  // meetAt(Timestamp) 계산
+  // meetAt Timestamp 변환
   const getMeetAt = (): Timestamp | null => {
     if (!meetDate || !meetTime) return null;
-    const [hh, mm] = meetTime.split(":").map((v) => parseInt(v, 10));
+    const [hh, mm] = meetTime.split(":").map(Number);
     const d = new Date(meetDate);
     d.setHours(hh, mm, 0, 0);
     return Timestamp.fromDate(d);
   };
 
+  // ✅ 등록
   const handleSubmit = async () => {
-    if (!currentUserId) {
-      alert("로그인이 필요합니다.");
-      return;
-    }
-    if (!title || !restaurant) {
-      alert("음식점 이름과 제목은 필수입니다.");
-      return;
-    }
-    const meetAtTs = getMeetAt();
-    if (!meetAtTs) {
-      const ok = confirm("모임 시간을 입력하지 않았습니다. 지금 그대로 등록할까요?");
-      if (!ok) return;
-    }
+    if (!currentUserId) return alert("로그인이 필요합니다.");
+    if (!title || !restaurant) return alert("음식점 이름과 제목은 필수입니다.");
+    if (!lat || !lng) return alert("위치를 선택해주세요.");
 
     try {
-      // posts doc 생성
+      const meetAtTs = getMeetAt();
+
       const payload: any = {
         authorId: currentUserId,
         authorName: currentUserName,
@@ -194,102 +210,82 @@ export default function UplistPage() {
         preferredGender,
         preferredMbti,
         maxParticipants,
-        status: "open", // open|full|closed
-        createdAt: Timestamp.now(),
+        status: "open",
         chatLink: chatLink || null,
+        createdAt: Timestamp.now(),
       };
 
-      // 지도에서 작성 정보 + place 저장
-      if (source === "map") {
-        payload.source = "map";
-        payload.place = {
-          id: placeId || null,
-          name: placeName || restaurant,
-          lat: lat ? Number(lat) : null,
-          lng: lng ? Number(lng) : null,
-          address: null, // 필요 시 지도에서 주소도 넘겨 저장 가능
-        };
-      }
+      // 지도에서 온 경우 + 수동 지도 클릭 모두 처리
+      payload.place = {
+        id: placeId || null,
+        name: placeName || restaurant,
+        lat: lat,
+        lng: lng,
+        address: location,
+      };
 
+      if (source === "map") payload.source = "map";
       if (meetAtTs) payload.meetAt = meetAtTs;
 
+      // Firestore 등록
       const postRef = await addDoc(collection(db, "posts"), payload);
 
-      // 참가자 서브컬렉션: 작성자 본인 자동 참여
-      await setDoc(
-        doc(db, "posts", postRef.id, "participants", currentUserId),
-        {
-          uid: currentUserId,
-          name: currentUserName || "익명",
-          joinedAt: Timestamp.now(),
-        }
-      );
+      // 작성자 자동 참가
+      await setDoc(doc(db, "posts", postRef.id, "participants", currentUserId), {
+        uid: currentUserId,
+        name: currentUserName,
+        joinedAt: Timestamp.now(),
+      });
 
-      // 꽉찬 상태 처리(최대인원 1인 설정 등 대비)
-      if (maxParticipants <= 1) {
-        await setDoc(
-          doc(db, "posts", postRef.id),
-          { status: "full" },
-          { merge: true }
-        );
-      }
-
-      // ICS 빠른 다운(옵션) — 모임 시간 입력되어 있으면 생성
+      // ICS 자동 다운로드
       if (meetAtTs) {
-        const meetDateObj = meetAtTs.toDate();
         downloadICS({
           title: `[밥친구] ${restaurant}`,
-          description: content || `${restaurant} 밥친구 모임`,
-          startAt: meetDateObj,
-          durationMinutes: 90,
-          locationText:
-            (source === "map" && placeName) ? `${placeName}` : restaurant,
+          description: content || `${restaurant} 모임`,
+          startAt: meetAtTs.toDate(),
+          locationText: location || restaurant,
         });
       }
 
-      alert("글이 등록되었습니다.");
-      router.push("/pages/matches"); // 홈으로 이동
+      alert("글이 등록되었습니다!");
+      router.push("/pages/matches");
     } catch (err) {
-      console.error(err);
+      console.error("글 등록 실패:", err);
       alert("글 등록에 실패했습니다.");
     }
   };
 
-  // 빠른 프리셋 버튼
-  const quickSetMeetAt = (preset: "TODAY_NOON" | "TODAY_EVENING" | "TOMORROW_EVENING") => {
-    const now = new Date();
-    const pad = (n: number) => `${n}`.padStart(2, "0");
-
-    let d = new Date(now);
-    let h = 19, m = 0;
-
-    if (preset === "TODAY_NOON") { h = 12; m = 30; }
-    if (preset === "TODAY_EVENING") { h = 19; m = 0; }
-    if (preset === "TOMORROW_EVENING") { d = new Date(now.getTime() + 86400000); h = 19; m = 0; }
-
-    const yyyy = d.getFullYear();
-    const MM = pad(d.getMonth() + 1);
-    const dd = pad(d.getDate());
-
-    setMeetDate(`${yyyy}-${MM}-${dd}`);
-    setMeetTime(`${pad(h)}:${pad(m)}`);
-  };
-
   return (
-    <div style={{ padding: 24, maxWidth: 760, margin: "0 auto", fontFamily: "Arial, sans-serif" }}>
-      <h1 style={{ fontSize: 24, fontWeight: 700, display: "flex", alignItems: "center", gap: 8 }}>
-        글 등록
-        {fromMapBadge}
+    <div style={{ padding: 24, maxWidth: 760, margin: "0 auto" }}>
+      <h1 style={{ fontSize: 24, fontWeight: 700 }}>
+        글 등록 {source === "map" && <span style={{ fontSize: 14, color: "#777" }}> (지도에서 작성됨)</span>}
       </h1>
 
-      {source === "map" && (
+      {source === "map" ? (
         <div style={{ fontSize: 13, color: "#555", marginBottom: 12 }}>
-          선택한 장소: <b>{placeName}</b>
-          {lat && lng ? ` · (${lat}, ${lng})` : null}
+          📍 선택된 장소: <b>{placeName}</b> ({lat}, {lng})
         </div>
+      ) : (
+        <>
+          <div
+            ref={mapRef}
+            style={{
+              width: "100%",
+              height: "250px",
+              border: "1px solid #ccc",
+              borderRadius: "10px",
+              marginBottom: "0.5rem",
+            }}
+          />
+          {lat && lng && (
+            <div style={{ fontSize: 14, color: "#333", marginBottom: 12 }}>
+              📍 선택된 위치: <b>{lat.toFixed(5)}, {lng.toFixed(5)}</b><br />
+              🏠 주소: {location || "주소 변환 중..."}
+            </div>
+          )}
+        </>
       )}
 
-      {/* 음식점 */}
       <input
         type="text"
         placeholder="음식점 이름"
@@ -298,12 +294,10 @@ export default function UplistPage() {
         style={{ width: "100%", padding: "10px", marginBottom: 8 }}
       />
 
-      {/* 카테고리 */}
       <div style={{ marginBottom: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
         {categories.map((cat) => (
           <button
             key={cat}
-            type="button"
             onClick={() => setCategory(cat)}
             style={{
               padding: "8px 12px",
@@ -319,7 +313,6 @@ export default function UplistPage() {
         ))}
       </div>
 
-      {/* 제목 */}
       <input
         type="text"
         placeholder="글 제목"
@@ -328,28 +321,21 @@ export default function UplistPage() {
         style={{ width: "100%", padding: "10px", marginBottom: 8 }}
       />
 
-      {/* 내용 */}
       <textarea
-        placeholder="글 내용 (만날 장소, 분위기, 예산 등)"
+        placeholder="글 내용"
         value={content}
         onChange={(e) => setContent(e.target.value)}
         style={{ width: "100%", padding: "10px", minHeight: 100, marginBottom: 8 }}
       />
 
       {/* 모임 시간 */}
-      <div style={{ display: "flex", gap: 8, marginBottom: 8, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 8, marginBottom: 12, alignItems: "center", flexWrap: "wrap" }}>
         <label>모임 날짜</label>
         <input type="date" value={meetDate} onChange={(e) => setMeetDate(e.target.value)} />
         <label>시간</label>
         <input type="time" value={meetTime} onChange={(e) => setMeetTime(e.target.value)} />
-        <div style={{ display: "flex", gap: 6 }}>
-          <button type="button" onClick={() => quickSetMeetAt("TODAY_NOON")} style={{ border: "1px solid #ccc", padding: "6px 8px", borderRadius: 6 }}>오늘 점심</button>
-          <button type="button" onClick={() => quickSetMeetAt("TODAY_EVENING")} style={{ border: "1px solid #ccc", padding: "6px 8px", borderRadius: 6 }}>오늘 저녁</button>
-          <button type="button" onClick={() => quickSetMeetAt("TOMORROW_EVENING")} style={{ border: "1px solid #ccc", padding: "6px 8px", borderRadius: 6 }}>내일 저녁</button>
-        </div>
       </div>
 
-      {/* 모집 인원 */}
       <input
         type="number"
         min={1}
@@ -359,19 +345,6 @@ export default function UplistPage() {
         style={{ width: "100%", padding: "10px", marginBottom: 8 }}
       />
 
-      {/* 지역 (서울 구) */}
-      <select
-        value={location}
-        onChange={(e) => setLocation(e.target.value)}
-        style={{ width: "100%", padding: "10px", marginBottom: 8 }}
-      >
-        <option value="">장소 선택 (서울 내 구)</option>
-        {SEOUL_DISTRICTS.map((dist) => (
-          <option key={dist} value={dist}>{dist}</option>
-        ))}
-      </select>
-
-      {/* 희망 성별 */}
       <select
         value={preferredGender}
         onChange={(e) => setPreferredGender(e.target.value)}
@@ -382,9 +355,8 @@ export default function UplistPage() {
         <option value="female">여성</option>
       </select>
 
-      {/* 희망 MBTI */}
       <div style={{ marginBottom: 12 }}>
-        <label style={{ display: "block", marginBottom: 6 }}>희망 MBTI (선택)</label>
+        <label style={{ display: "block", marginBottom: 6 }}>희망 MBTI</label>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
           {MBTI_TYPES.map((mbti) => (
             <button
@@ -394,9 +366,15 @@ export default function UplistPage() {
               style={{
                 padding: "6px 8px",
                 borderRadius: 8,
-                border: preferredMbti.includes(mbti) ? "2px solid #003366" : "1px solid #ccc",
-                backgroundColor: preferredMbti.includes(mbti) ? "#003366" : "white",
-                color: preferredMbti.includes(mbti) ? "white" : "#003366",
+                border: preferredMbti.includes(mbti)
+                  ? "2px solid #003366"
+                  : "1px solid #ccc",
+                backgroundColor: preferredMbti.includes(mbti)
+                  ? "#003366"
+                  : "white",
+                color: preferredMbti.includes(mbti)
+                  ? "white"
+                  : "#003366",
                 cursor: "pointer",
               }}
             >
@@ -406,7 +384,6 @@ export default function UplistPage() {
         </div>
       </div>
 
-      {/* 채팅 링크 */}
       <input
         type="url"
         placeholder="오픈채팅/연락 링크 (선택)"
@@ -431,3 +408,4 @@ export default function UplistPage() {
     </div>
   );
 }
+
