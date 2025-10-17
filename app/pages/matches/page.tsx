@@ -25,7 +25,8 @@ export default function MatchesPage() {
     maxParticipants?: number;
     location?: string;
     status?: "open" | "closed";
-    participantsCount?: number; // ✅ 여기만 쓰자
+    participantsCount?: number;
+    createdAt?: Date | null; // ✅ 표시용
   };
 
   const router = useRouter();
@@ -36,12 +37,31 @@ export default function MatchesPage() {
   const [location, setLocation] = useState("전체");
   const [showClosed, setShowClosed] = useState(false);
 
+  // ✅ 정렬 옵션
+  type SortBy = "latest" | "oldest" | "fill-desc" | "fill-asc";
+  const [sortBy, setSortBy] = useState<SortBy>("latest");
+
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
   useEffect(() => {
     setCurrentUserId(auth.currentUser?.uid || null);
     const unsub = auth.onAuthStateChanged((u) => setCurrentUserId(u?.uid ?? null));
     return () => unsub();
   }, []);
+
+  // 시간 포맷
+  const timeAgo = (d?: Date | null) => {
+    if (!d) return "";
+    const diff = (Date.now() - d.getTime()) / 1000; // s
+    if (diff < 60) return "방금 전";
+    if (diff < 3600) return `${Math.floor(diff / 60)}분 전`;
+    if (diff < 86400) return `${Math.floor(diff / 3600)}시간 전`;
+    if (diff < 86400 * 7) return `${Math.floor(diff / 86400)}일 전`;
+    // YYYY.MM.DD HH:mm
+    const pad = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}.${pad(d.getMonth() + 1)}.${pad(d.getDate())} ${pad(
+      d.getHours()
+    )}:${pad(d.getMinutes())}`;
+  };
 
   // ✅ 실시간 구독 + 자동 마감 처리 (participantsCount 기준)
   useEffect(() => {
@@ -58,10 +78,8 @@ export default function MatchesPage() {
         const max: number | undefined =
           typeof data.maxParticipants === "number" ? data.maxParticipants : undefined;
         const status: "open" | "closed" = data.status ?? "open";
-
         const full = typeof max === "number" && max > 0 ? curr >= max : false;
 
-        // 꽉 찼는데 아직 open이면 자동 마감
         if (full && status !== "closed") {
           updates.push(
             updateDoc(doc(db, "posts", d.id), {
@@ -82,7 +100,8 @@ export default function MatchesPage() {
           maxParticipants: max,
           location: data.location ?? "",
           status,
-          participantsCount: curr, // ✅ 여기!
+          participantsCount: curr,
+          createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : null, // ✅
         });
       });
 
@@ -102,6 +121,7 @@ export default function MatchesPage() {
     "종로구","중구","중랑구",
   ];
 
+  // 삭제
   const handleDelete = async (postId: string) => {
     if (!currentUserId) return;
     try {
@@ -113,6 +133,7 @@ export default function MatchesPage() {
     }
   };
 
+  // 필터링
   const filteredPosts = useMemo(() => {
     return posts.filter((post) => {
       if (!showClosed && post.status === "closed") return false;
@@ -125,8 +146,37 @@ export default function MatchesPage() {
     });
   }, [posts, showClosed, category, location, search]);
 
+  // ✅ 정렬
+  const sortedPosts = useMemo(() => {
+    const arr = [...filteredPosts];
+    arr.sort((a, b) => {
+      const aCnt = typeof a.participantsCount === "number" ? a.participantsCount : 0;
+      const bCnt = typeof b.participantsCount === "number" ? b.participantsCount : 0;
+      const aMax = typeof a.maxParticipants === "number" ? a.maxParticipants : 0;
+      const bMax = typeof b.maxParticipants === "number" ? b.maxParticipants : 0;
+
+      if (sortBy === "latest") {
+        return (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0);
+      }
+      if (sortBy === "oldest") {
+        return (a.createdAt?.getTime() || 0) - (b.createdAt?.getTime() || 0);
+      }
+      if (sortBy === "fill-desc") {
+        const aRate = aMax ? aCnt / aMax : 0;
+        const bRate = bMax ? bCnt / bMax : 0;
+        return bRate - aRate;
+      }
+      // "fill-asc"
+      const aRate = aMax ? aCnt / aMax : 0;
+      const bRate2 = bMax ? bCnt / bMax : 0;
+      return aRate - bRate2;
+    });
+    return arr;
+  }, [filteredPosts, sortBy]);
+
   return (
     <div style={{ padding: "2rem", fontFamily: "Arial, sans-serif", paddingBottom: "90px" }}>
+      {/* 헤더 + 정렬 */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: "1rem" }}>
         <h1 style={{ fontSize: "2rem", margin: 0 }}>모임 찾기</h1>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, color: "#444" }}>
@@ -137,8 +187,22 @@ export default function MatchesPage() {
           />
           마감 포함 보기
         </label>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ fontSize: 13, color: "#666" }}>정렬</span>
+          <select
+            value={sortBy}
+            onChange={(e) => setSortBy(e.target.value as SortBy)}
+            style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #ddd" }}
+          >
+            <option value="latest">최신순</option>
+            <option value="oldest">오래된순</option>
+            <option value="fill-desc">채움률 높은순</option>
+            <option value="fill-asc">채움률 낮은순</option>
+          </select>
+        </div>
       </div>
 
+      {/* 검색 */}
       <input
         type="text"
         placeholder="검색어 입력"
@@ -147,8 +211,9 @@ export default function MatchesPage() {
         style={{ padding: "0.5rem", width: "100%", marginBottom: "1rem", borderRadius: "5px", border: "1px solid #ccc" }}
       />
 
+      {/* 카테고리 */}
       <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-        {categories.map((cat) => (
+        {["전체","한식","중식","일식","양식"].map((cat) => (
           <button
             key={cat}
             onClick={() => setCategory(cat)}
@@ -166,8 +231,14 @@ export default function MatchesPage() {
         ))}
       </div>
 
+      {/* 장소 */}
       <div style={{ marginBottom: "1rem", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-        {SEOUL_DISTRICTS.map((dist) => (
+        {[
+          "전체","강남구","강동구","강북구","강서구","관악구","광진구","구로구","금천구",
+          "노원구","도봉구","동대문구","동작구","마포구","서대문구","서초구",
+          "성동구","성북구","송파구","양천구","영등포구","용산구","은평구",
+          "종로구","중구","중랑구",
+        ].map((dist) => (
           <button
             key={dist}
             onClick={() => setLocation(dist)}
@@ -185,6 +256,7 @@ export default function MatchesPage() {
         ))}
       </div>
 
+      {/* 글 등록 */}
       <button
         onClick={() => router.push("/pages/matches/uplist")}
         style={{ padding: "0.5rem 1.5rem", backgroundColor: "#003366", color: "white", border: "none", borderRadius: "5px", cursor: "pointer", marginBottom: "1rem" }}
@@ -192,9 +264,10 @@ export default function MatchesPage() {
         글 등록
       </button>
 
+      {/* 리스트 */}
       <div>
-        {filteredPosts.map((post) => {
-          const curr = typeof post.participantsCount === "number" ? post.participantsCount : 0; // ✅
+        {sortedPosts.map((post) => {
+          const curr = typeof post.participantsCount === "number" ? post.participantsCount : 0;
           const hasMax = typeof post.maxParticipants === "number" && post.maxParticipants > 0;
           const full = hasMax ? curr >= (post.maxParticipants as number) : false;
           const pct = hasMax ? Math.min(100, Math.round((curr / (post.maxParticipants as number)) * 100)) : 0;
@@ -213,6 +286,7 @@ export default function MatchesPage() {
               }}
               onClick={() => router.push(`/pages/matches/${post.id}`)}
             >
+              {/* 제목 + 배지 + 작성시각 */}
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                 <strong style={{ fontSize: 16 }}>{post.title}</strong>
                 {hasMax && (
@@ -229,6 +303,9 @@ export default function MatchesPage() {
                     {full ? "마감" : "모집중"}
                   </span>
                 )}
+                <span title={post.createdAt?.toString()} style={{ marginLeft: "auto", fontSize: 12, color: "#6b7280" }}>
+                  {timeAgo(post.createdAt)} {/* ✅ 작성 시각 표기 */}
+                </span>
               </div>
 
               <p style={{ margin: "2px 0", color: "#333" }}>
