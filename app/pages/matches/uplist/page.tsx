@@ -1,4 +1,5 @@
 "use client";
+import { Suspense } from "react";
 import { useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { addDoc, collection, doc, setDoc, Timestamp } from "firebase/firestore";
@@ -57,7 +58,16 @@ async function downloadICS({
   }
 }
 
+// ✅ 1️⃣ 바깥쪽: Suspense로 감싸는 부모
 export default function UplistPage() {
+  return (
+    <Suspense fallback={<div>로딩 중...</div>}>
+      <InnerUplistPage />
+    </Suspense>
+  );
+}
+
+function InnerUplistPage() {
   const router = useRouter();
   const sp = useSearchParams();
 
