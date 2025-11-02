@@ -147,7 +147,6 @@ export default function MatchesPage() {
           display: "flex",
           justifyContent: "center",
           alignItems: "center",
-          position: "relative",
         }}
       >
         <span
