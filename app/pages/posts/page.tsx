@@ -348,7 +348,7 @@ function PostCard({
                   onChange(
                     "preferredMbti",
                     editData.preferredMbti?.includes(m)
-                      ? editData.preferredMbti.filter((x) => x !== m)
+                      ? editData.preferredMbti.filter((x: string) => x !== m)
                       : [...(editData.preferredMbti || []), m]
                   )
                 }
